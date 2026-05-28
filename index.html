@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>龍女體育｜專業數據參考中心 v10</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root{--bg:#070b14;--panel:#0f172a;--panel2:#020617;--line:rgba(148,163,184,.16);--text:#e5e7eb;--muted:#94a3b8;--gold:#fbbf24;--green:#34d399;--blue:#60a5fa;--pink:#f472b6;}
+body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12),transparent 30%),var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Noto Sans TC","Microsoft JhengHei",Arial,sans-serif}
+.card{background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(5,10,24,.96));border:1px solid var(--line);box-shadow:0 18px 44px rgba(0,0,0,.32)}
+.soft{background:rgba(2,6,23,.72);border:1px solid var(--line)}
+.gold{background:linear-gradient(90deg,#fbbf24,#34d399);-webkit-background-clip:text;color:transparent}
+.active{background:linear-gradient(90deg,#f59e0b,#10b981)!important;color:#06101a!important;border-color:transparent!important}
+.section-title{font-size:1rem;font-weight:950;color:var(--gold);margin-bottom:.85rem;letter-spacing:.02em}
+.market{font-size:1.08rem;font-weight:900;line-height:1.1;white-space:nowrap}
+.market-big{font-size:1.8rem;font-weight:950;line-height:1.05}
+.conf{height:8px;border-radius:999px;background:#162033;overflow:hidden}.conf>i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#fbbf24,#34d399)}
+.click-name{cursor:pointer;text-decoration:underline;text-decoration-color:rgba(52,211,153,.35);text-underline-offset:4px}
+.modal-open{overflow:hidden}
+.rank-podium{display:grid;grid-template-columns:1fr 1.18fr 1fr;gap:10px;align-items:end}
+.podium-col{border-radius:18px 18px 0 0;padding:10px;text-align:center;border:1px solid rgba(148,163,184,.18)}
+.podium-1{height:156px;background:linear-gradient(180deg,rgba(251,191,36,.28),rgba(251,191,36,.07))}
+.podium-2{height:122px;background:linear-gradient(180deg,rgba(148,163,184,.28),rgba(148,163,184,.07))}
+.podium-3{height:106px;background:linear-gradient(180deg,rgba(251,146,60,.28),rgba(251,146,60,.07))}
+.rank-table-compact{display:grid;gap:8px;margin-top:10px}
+.rank-table-compact .row{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:#020617;border:1px solid rgba(148,163,184,.12)}
+.rank-table-compact .pos{width:26px;height:26px;border-radius:999px;background:rgba(251,191,36,.12);display:flex;align-items:center;justify-content:center;color:#fbbf24;font-size:.8rem;font-weight:950}
+.rank-table-compact .nick{font-size:.88rem;font-weight:900;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank-table-compact .value{font-size:.86rem;font-weight:950;color:#34d399}
+.rank-caption{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.rank-caption .badge{display:none}
+.modal-rank-wrap{display:grid;gap:14px}
+.compact-rank-card{padding:14px;border-radius:22px;background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.98));border:1px solid rgba(148,163,184,.16)}
+.compact-rank-card .honor-head{margin-bottom:10px}.compact-rank-card .honor-title{font-size:.98rem}.compact-rank-card .honor-sub{font-size:.74rem}
+.compact-rank-card .rank-podium{grid-template-columns:1fr 1.08fr 1fr;gap:8px}
+.compact-rank-card .podium-col{border-radius:14px 14px 0 0;padding:8px}
+.compact-rank-card .podium-1{height:112px}.compact-rank-card .podium-2{height:92px}.compact-rank-card .podium-3{height:82px}
+.compact-rank-card .podium-col .text-3xl{font-size:1.5rem;line-height:1}.compact-rank-card .podium-col .font-black.mt-2{font-size:.85rem}.compact-rank-card .podium-col .text-emerald-300{font-size:.82rem}
+.stat-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.stat-box{border-radius:16px;background:#020617;border:1px solid rgba(148,163,184,.16);padding:14px}
+.stat-num{font-size:1.5rem;line-height:1;font-weight:950;color:#34d399}
+.stat-label{font-size:.82rem;color:#94a3b8;font-weight:800;margin-top:6px}
+.date-badge{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.28);color:#fbbf24;font-size:.82rem;font-weight:950;padding:6px 10px;white-space:nowrap}
+.win{color:#22c55e;font-weight:950}.loss{color:#ef4444;font-weight:950}.draw{color:#cbd5e1;font-weight:950}
+.comp-bar{height:10px;background:#1f2937;position:relative;border-radius:999px;overflow:hidden}
+.comp-bar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--l);background:#38bdf8}
+.comp-bar::after{content:"";position:absolute;right:0;top:0;bottom:0;width:var(--r);background:#fbbf24}
+.midline{position:absolute;left:50%;top:0;bottom:0;width:2px;background:#e5e7eb;opacity:.9;z-index:2}
+.team-head-a{color:#60a5fa}.team-head-b{color:#fbbf24}
+.football-head{font-size:1.2rem;font-weight:950}
+.hero-tag{font-size:.72rem;padding:4px 8px;border-radius:999px;background:#1e293b;color:#cbd5e1;font-weight:800}
+.road-wrap{position:relative;height:160px;background:linear-gradient(180deg,#87ceeb 0 28%,#84cc16 28% 100%);border-radius:18px;overflow:hidden;border:1px solid rgba(148,163,184,.18)}
+.road{position:absolute;left:50%;transform:translateX(-50%);top:0;bottom:0;width:42%;background:#4b5563}
+.road:before{content:"";position:absolute;left:50%;transform:translateX(-50%);top:0;bottom:0;width:5px;background:repeating-linear-gradient(to bottom,#fff 0 18px,transparent 18px 34px)}
+.crossing{position:absolute;left:50%;transform:translateX(-50%);bottom:14px;width:44%;height:18px;background:repeating-linear-gradient(to right,#fff 0 12px,transparent 12px 18px)}
+.light{position:absolute;right:16px;bottom:28px;width:16px;height:46px;background:#111827;border-radius:8px}.light:before,.light:after{content:"";position:absolute;left:3px;width:10px;height:10px;border-radius:50%}.light:before{top:7px;background:#ef4444}.light:after{bottom:7px;background:#22c55e}
+.grandma{position:absolute;left:16%;bottom:42px;font-size:42px;transition:left .5s ease}.grandma.right{left:70%}
+.tree{position:absolute;font-size:18px}.speech{font-size:.85rem;color:#fbbf24;font-weight:900}
+
+.woodfish-img{width:130px;height:110px;object-fit:contain;filter:drop-shadow(0 8px 18px rgba(0,0,0,.35))}
+.grandma-scene{position:relative;height:220px;border-radius:18px;overflow:hidden;border:1px solid rgba(148,163,184,.18);background:#111827}
+.grandma-road{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.grandma-sprite{position:absolute;left:7%;bottom:12px;width:92px;transition:left .7s ease;filter:drop-shadow(0 8px 12px rgba(0,0,0,.35))}
+.grandma-sprite.right{left:72%}
+.wood-rank .item{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:12px;background:#020617;border:1px solid rgba(148,163,184,.12)}
+.wood-rank .name{font-weight:800;color:#cbd5e1;font-size:.88rem}
+.wood-rank .score{font-weight:900;color:#34d399;font-size:.88rem}
+
+
+.nav-btn{border:1px solid rgba(148,163,184,.18);background:#020617;border-radius:999px;padding:10px 14px;font-size:.86rem;font-weight:950;color:#cbd5e1}
+.nav-btn:hover{border-color:rgba(52,211,153,.45);color:#34d399}
+.summary-chip{display:inline-flex;border:1px solid rgba(148,163,184,.18);background:#020617;border-radius:999px;padding:5px 9px;font-size:.72rem;font-weight:900;color:#cbd5e1}
+.control-btn{padding:11px 14px;transition:transform .15s ease,filter .15s ease}.control-btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
+.member-link,.member-done{border:1px solid rgba(148,163,184,.14);background:#020617;border-radius:14px;padding:12px 14px;font-weight:900;color:#cbd5e1;display:flex;align-items:center;justify-content:space-between;gap:10px}.member-done span{color:#94a3b8}.member-done b{color:#34d399}
+.mini-divider{margin-top:12px;padding-top:12px;border-top:1px dashed rgba(148,163,184,.18)}.mini-title{font-size:.88rem;font-weight:950;color:#fbbf24}
+.simple-rank{display:grid;gap:8px}.simple-rank .rank-line{display:grid;grid-template-columns:34px minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:#020617;border:1px solid rgba(148,163,184,.14)}.simple-rank .rank-no{color:#fbbf24;font-weight:950}.simple-rank .rank-name{font-weight:900;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.simple-rank .rank-score{font-weight:950;color:#34d399;white-space:nowrap}
+.modal-rank-wrap{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.compact-rank-card{min-height:0}.honor-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px}.honor-title{font-size:1rem;font-weight:950;color:#fbbf24}.honor-sub{font-size:.75rem;color:#94a3b8;font-weight:800;margin-top:2px}.honor-badge{border-radius:999px;background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.2);color:#fbbf24;font-size:.68rem;font-weight:950;padding:4px 8px;white-space:nowrap}
+@media(max-width:900px){.modal-rank-wrap{grid-template-columns:1fr}.simple-rank .rank-line{grid-template-columns:30px minmax(0,1fr) auto}.member-link,.member-done{font-size:.88rem}.woodfish-img{width:120px;height:105px}.grandma-scene{height:190px}}
+
+@media(max-width:900px){.market{font-size:.95rem}.market-big{font-size:1.45rem}.football-head{font-size:1.05rem}.stat-num{font-size:1.3rem}.grandma-sprite{width:82px}}
+
+.auth-tab{flex:1;border:1px solid rgba(148,163,184,.18);background:#020617;border-radius:14px;padding:10px 12px;font-size:.9rem;font-weight:950;color:#cbd5e1}
+.auth-tab.active{background:linear-gradient(90deg,rgba(251,191,36,.18),rgba(52,211,153,.16));border-color:rgba(251,191,36,.3);color:#f8fafc}
+.input-field{width:100%;border:1px solid rgba(148,163,184,.18);background:#020617;border-radius:14px;padding:12px 14px;color:#e2e8f0;font-weight:800}
+.auth-btn{width:100%;padding:12px 14px;border-radius:14px;background:linear-gradient(90deg,#fbbf24,#4ade80);color:#0f172a;font-weight:950}
+.user-chip{border-radius:999px;border:1px solid rgba(52,211,153,.25);background:rgba(52,211,153,.10);color:#86efac;padding:8px 12px}
+.admin-chip{border-radius:999px;border:1px solid rgba(251,191,36,.22);background:rgba(251,191,36,.10);color:#fcd34d;padding:8px 12px}
+.member-link{border:1px solid rgba(148,163,184,.14);background:#020617;border-radius:14px;padding:12px 14px;font-weight:900;color:#cbd5e1;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;transition:all .15s ease}
+.member-link:hover{border-color:rgba(52,211,153,.35);transform:translateY(-1px)}
+.comment-tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}.comment-tab{border:1px solid rgba(148,163,184,.18);background:#020617;border-radius:999px;padding:10px 14px;font-size:.86rem;font-weight:950;color:#cbd5e1}.comment-tab.active{background:linear-gradient(90deg,rgba(251,191,36,.20),rgba(52,211,153,.18));color:#f8fafc;border-color:rgba(251,191,36,.28)}
+.action-row{display:flex;gap:8px;flex-wrap:nowrap}.action-row button{flex:1;white-space:nowrap}
+.inline-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.inline-stat{border:1px solid rgba(148,163,184,.14);background:#020617;border-radius:14px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px}.inline-stat .v{font-size:1.55rem;line-height:1;font-weight:950;color:#5eead4}.inline-stat .k{font-size:.82rem;font-weight:900;color:#94a3b8}
+.wood-anim-wrap{position:relative;display:inline-block}.wood-float{position:absolute;left:50%;top:16px;transform:translateX(-50%);font-size:1rem;font-weight:950;color:#fbbf24;opacity:0;pointer-events:none;text-shadow:0 4px 16px rgba(0,0,0,.4)}.wood-float.play{animation:woodPlus .95s ease forwards}@keyframes woodPlus{0%{opacity:0;transform:translate(-50%,10px) scale(.85)}15%{opacity:1}100%{opacity:0;transform:translate(-50%,-42px) scale(1.08)}}
+.grandma-bubble{position:absolute;left:4%;top:14px;max-width:58%;padding:10px 12px;border-radius:16px;background:white;color:#0f172a;font-size:.8rem;font-weight:900;box-shadow:0 12px 30px rgba(0,0,0,.28);transition:left .7s ease,opacity .2s ease}.grandma-bubble:after{content:'';position:absolute;left:22px;bottom:-8px;border-width:8px 8px 0 8px;border-style:solid;border-color:white transparent transparent transparent}.grandma-bubble.right{left:38%}
+.pundit-carousel{display:flex;gap:12px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory}.pundit-carousel::-webkit-scrollbar{height:8px}.pundit-carousel::-webkit-scrollbar-thumb{background:#1e293b;border-radius:999px}.pundit-card{min-width:240px;max-width:240px;scroll-snap-align:start;border:1px solid rgba(148,163,184,.14);background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.98));border-radius:18px;padding:14px}.pundit-card .p-top{display:flex;justify-content:space-between;align-items:center;gap:8px}.pundit-card .p-name{font-weight:950;color:#fbbf24}.pundit-card .p-page{font-size:.72rem;color:#94a3b8;font-weight:900}.pundit-card .p-pick{margin-top:10px;color:#7dd3fc;font-weight:900}.pundit-card .p-time{margin-top:10px;font-size:.73rem;color:#94a3b8;font-weight:900}.pundit-card .p-desc{margin-top:10px;font-size:.82rem;color:#cbd5e1;line-height:1.55}
+#memberContent .meta-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}#memberContent .meta-card{border-radius:18px;background:#020617;border:1px solid rgba(148,163,184,.14);padding:16px}#memberContent .meta-card .label{font-size:.74rem;font-weight:950;color:#64748b}#memberContent .meta-card .value{margin-top:6px;font-size:1.45rem;font-weight:950}
+@media(max-width:768px){#memberContent .meta-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.inline-stats{grid-template-columns:1fr}.action-row{width:100%}.action-row button{padding-left:10px;padding-right:10px;font-size:.85rem}.pundit-card{min-width:210px;max-width:210px}}
+
+
+.wood-float.left{left:-12px;top:20px}
+.board-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+.board-title{font-weight:950;color:#fbbf24}
+.board-btn{border:1px solid rgba(52,211,153,.28);background:rgba(52,211,153,.1);color:#86efac;border-radius:999px;padding:8px 12px;font-size:.82rem;font-weight:950}
+.board-pager{display:flex;justify-content:center;gap:8px;margin-top:12px}
+.board-page-btn{border:1px solid rgba(148,163,184,.16);background:#020617;color:#cbd5e1;border-radius:999px;padding:7px 12px;font-size:.78rem;font-weight:950}
+.board-page-btn.active{background:rgba(251,191,36,.16);border-color:rgba(251,191,36,.28);color:#fbbf24}
+.comment-list{display:grid;gap:10px}
+.comment-card{border:1px solid rgba(148,163,184,.14);background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.98));border-radius:16px;padding:14px}
+.comment-card .top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.comment-card .name{font-weight:950;color:#fbbf24}
+.comment-card .tag{font-size:.72rem;color:#94a3b8;font-weight:900}
+.comment-card .pick{margin-top:9px;color:#7dd3fc;font-weight:950}
+.comment-card .body{margin-top:8px;color:#cbd5e1;font-size:.88rem;line-height:1.55}
+.comment-card .time{margin-top:8px;color:#64748b;font-size:.74rem;font-weight:900}
+
+
+.pred-card{border:1px solid rgba(148,163,184,.14);background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.98));border-radius:18px;padding:14px;display:grid;gap:12px}
+.pred-top{display:flex;justify-content:space-between;align-items:center;gap:10px}.pred-game{font-weight:950;color:#e5e7eb}.pred-line{font-size:.82rem;color:#94a3b8;font-weight:900}.pred-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}.pred-btn{border:1px solid rgba(148,163,184,.16);background:#020617;border-radius:14px;padding:11px 12px;font-weight:950;color:#cbd5e1}.pred-btn.active{background:linear-gradient(90deg,rgba(251,191,36,.18),rgba(52,211,153,.16));border-color:rgba(52,211,153,.32);color:#86efac}.pred-status{font-size:.78rem;color:#fbbf24;font-weight:900}.pred-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px}.pred-summary .box{border:1px solid rgba(148,163,184,.14);background:#020617;border-radius:16px;padding:12px}.pred-summary .label{font-size:.72rem;color:#64748b;font-weight:950}.pred-summary .val{margin-top:5px;font-size:1.25rem;font-weight:950;color:#34d399}
+.sort-tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.sort-btn{border:1px solid rgba(148,163,184,.16);background:#020617;color:#cbd5e1;border-radius:999px;padding:8px 12px;font-size:.78rem;font-weight:950}.sort-btn.active{background:rgba(251,191,36,.16);border-color:rgba(251,191,36,.28);color:#fbbf24}.acc-pill{font-size:.72rem;color:#34d399;background:rgba(52,211,153,.10);border:1px solid rgba(52,211,153,.18);border-radius:999px;padding:5px 8px;font-weight:950;white-space:nowrap}
+@media(max-width:768px){.pred-summary{grid-template-columns:1fr}.pred-top{align-items:flex-start;flex-direction:column}}
+
+
+.pred-filter{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.pred-filter-btn{border:1px solid rgba(148,163,184,.16);background:#020617;color:#cbd5e1;border-radius:999px;padding:9px 14px;font-size:.86rem;font-weight:950}.pred-filter-btn.active{background:linear-gradient(90deg,rgba(251,191,36,.18),rgba(52,211,153,.16));border-color:rgba(52,211,153,.32);color:#f8fafc}
+.pred-market{border:1px solid rgba(148,163,184,.12);background:#020617;border-radius:16px;padding:12px;margin-top:10px}.pred-market-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px}.pred-market-title{font-size:.86rem;font-weight:950;color:#fbbf24}.pred-market-line{font-size:.78rem;font-weight:900;color:#94a3b8}.pred-actions.three{grid-template-columns:repeat(2,minmax(0,1fr))}.pred-save-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.pred-note{font-size:.72rem;color:#64748b;font-weight:900;margin-top:8px}.woodfish-img.hit{animation:woodHit .18s ease}@keyframes woodHit{0%{transform:scale(1) rotate(0deg)}50%{transform:scale(.94) rotate(-4deg)}100%{transform:scale(1) rotate(0deg)}}
+@media(max-width:700px){.pred-save-row{grid-template-columns:1fr}.pred-actions.three{grid-template-columns:1fr}}
+
+
+.site-mode-badge{border-radius:999px;border:1px solid rgba(251,191,36,.24);background:rgba(251,191,36,.10);color:#fcd34d;padding:8px 12px;font-weight:950;font-size:.72rem}
+.pred-market-line.clean{color:#e5e7eb;font-weight:950}
+
+</style>
+<script src="./config.js"></script>
+</head>
+<body>
+<header class="sticky top-0 z-40 bg-[#070a13]/95 backdrop-blur border-b border-slate-800">
+  <div class="max-w-7xl mx-auto px-4 py-4">
+    <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+      <div>
+        <h1 class="text-2xl md:text-3xl font-black gold">砲哥體育AI數據統整系統</h1>
+        <p class="text-sm text-slate-400 mt-2">歡迎交流，有任何疑問歡迎聯繫管理員</p>
+      </div>
+      <div class="xl:text-right space-y-3">
+        <div id="levelStats" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] font-black"></div>
+        <div class="flex flex-wrap xl:justify-end items-center gap-2 text-[11px] font-black">
+          <div class="rounded-full bg-slate-900 border border-slate-700 px-3 py-2 text-slate-300">總共在線 <span id="onlineTotal">0</span></div>
+          <div id="adminOnline" class="flex flex-wrap gap-2"></div>
+          <div id="authStatusWrap" class="flex flex-wrap gap-2"></div>
+        </div>
+      </div>
+    </div>
+    <nav class="mt-4 flex flex-wrap gap-2">
+      <button class="nav-btn" onclick="document.getElementById('gamesBlock').scrollIntoView({behavior:'smooth'})">今日賽事</button>
+      <button class="nav-btn" onclick="openPredictionCenter()">賽事預測</button>
+      <button class="nav-btn" onclick="openMemberCenter()">會員中心</button>
+      <button class="nav-btn" onclick="openAllRanks()">排行榜</button>
+      <button class="nav-btn" onclick="openContact()">聯絡我們</button>
+      <button class="nav-btn" onclick="openBet()">我要投注</button>
+      <button class="nav-btn" onclick="openAuthModal('login')">登入 / 註冊</button>
+      <button id="logoutBtn" class="nav-btn hidden" onclick="logout()">登出</button>
+    </nav>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto p-4">
+  <section class="grid lg:grid-cols-[1fr_365px] gap-4">
+    <div class="space-y-4">
+      <section class="card rounded-3xl p-4">
+        <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+          <div>
+            <h2 class="font-black text-lg">今日賽事</h2>
+            <p class="text-xs text-slate-500 mt-1">首頁只顯示最重要的方向，詳細數據點「查看數據」。</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button class="sport active rounded-2xl border border-slate-700 px-5 py-3 font-black" data-sport="baseball">棒球</button>
+            <button class="sport rounded-2xl border border-slate-700 bg-slate-900 px-5 py-3 font-black" data-sport="basketball">籃球</button>
+            <button class="sport rounded-2xl border border-slate-700 bg-slate-900 px-5 py-3 font-black" data-sport="football">足球</button>
+          </div>
+        </div>
+        <div id="leagues" class="flex flex-wrap gap-2 mt-4"></div>
+      </section>
+
+      <section id="gamesBlock" class="card rounded-3xl p-4">
+        <div class="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 id="leagueTitle" class="text-lg font-black">MLB｜今日賽事</h2>
+            <p class="text-xs text-slate-500">★ 大眾普遍參考方向，正式版依當日資料自動更新。</p>
+          </div>
+          <div class="text-xs text-emerald-300 font-black">資料同步中</div>
+        </div>
+        <div id="games" class="grid gap-3"></div>
+      </section>
+    </div>
+
+    <aside class="space-y-4">
+      <section class="card rounded-3xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-black text-amber-300">體育預測排行榜</h3>
+          <select id="rankTab" onchange="renderRank()" class="rounded-xl bg-slate-950 border border-slate-700 px-2 py-1 text-xs">
+            <option value="day">本日</option><option value="week">本周</option><option value="month">本月</option>
+          </select>
+        </div>
+        <div id="rankPodium" class="rank-podium mb-3"></div>
+        <div class="border-t border-dashed border-slate-700 pt-3">
+          <div class="text-xs text-slate-500 font-black mb-2">4 - 10 名</div>
+          <div id="rankList" class="space-y-2 text-sm"></div>
+        </div>
+      </section>
+
+      <section class="card rounded-3xl p-4">
+        <h3 class="font-black text-amber-300 mb-3">今日好手熱推</h3>
+        <div class="space-y-2" id="hotPicks"></div>
+      </section>
+<section class="card rounded-3xl p-4 widget-compact">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-black text-amber-300">功德木魚</h3>
+          <div class="text-xs text-emerald-300 font-black">今日功德 <span id="woodCount">108</span></div>
+        </div>
+        <div class="soft rounded-2xl p-3">
+          <div class="grid grid-cols-[100px_1fr] gap-3 items-center">
+            <div class="flex flex-col items-center text-center">
+              <div class="wood-anim-wrap"><img src="assets/woodfish.png" alt="木魚" class="woodfish-img"><div id="woodFloat" class="wood-float left">功德 +1</div></div>
+            </div>
+            <div>
+              <button onclick="knockWood()" class="control-btn w-full rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black">敲木魚</button>
+            </div>
+          </div>
+          <div class="mini-divider">
+            <div class="rank-caption"><div class="mini-title">功德排行榜</div></div>
+            <div class="simple-rank">
+              <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">龍女信徒</div><div class="rank-score">356 下</div></div>
+              <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">夜盤觀察員</div><div class="rank-score">312 下</div></div>
+              <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">林口兄弟</div><div class="rank-score">281 下</div></div>
+              <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">水過仙人</div><div class="rank-score">239 下</div></div>
+              <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">北區老司機</div><div class="rank-score">201 下</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card rounded-3xl p-4 widget-compact">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-black text-amber-300">扶阿嬤過馬路</h3>
+          <div class="text-xs text-emerald-300 font-black">累積次數 <span id="grandmaCount">26</span></div>
+        </div>
+        <div class="soft rounded-2xl p-3">
+          <div class="grandma-scene compact">
+            <img src="assets/road.png" alt="馬路" class="grandma-road">
+            <img src="assets/grandma.png" alt="阿嬤" id="grandma" class="grandma-sprite compact"><div id="grandmaBubble" class="grandma-bubble hidden">祝你開轟</div>
+          </div>
+          <div class="speech mt-2 text-xs" id="grandmaMsg">幫阿嬤順利過馬路吧</div>
+          <button id="grandmaBtn" onclick="moveGrandma()" class="control-btn mt-3 w-full rounded-xl bg-gradient-to-r from-sky-400 to-emerald-400 text-slate-950 font-black">扶阿嬤過馬路</button>
+          <div class="mini-divider">
+            <div class="rank-caption"><div class="mini-title">阿嬤排行榜</div></div>
+            <div class="simple-rank">
+              <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">好心人阿凱</div><div class="rank-score">188 次</div></div>
+              <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">水過仙人</div><div class="rank-score">151 次</div></div>
+              <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">北區老司機</div><div class="rank-score">129 次</div></div>
+              <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">龍女信徒</div><div class="rank-score">118 次</div></div>
+              <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">小分仔</div><div class="rank-score">103 次</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </section>
+</main>
+
+<div id="gameModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm p-3 md:p-6">
+  <div class="mx-auto max-w-7xl max-h-[92vh] overflow-y-auto card rounded-3xl">
+    <div class="sticky top-0 bg-[#0b1220]/95 backdrop-blur border-b border-slate-800 p-4 flex items-start justify-between gap-3">
+      <div>
+        <div id="modalLeague" class="text-xs text-slate-500 font-black"></div>
+        <h3 id="modalTitle" class="text-xl md:text-2xl font-black"></h3>
+      </div>
+      <button onclick="closeGame()" class="rounded-xl bg-slate-800 px-3 py-2 text-sm font-black">關閉</button>
+    </div>
+    <div id="modalBody" class="p-4 space-y-5"></div>
+  </div>
+</div>
+
+<div id="rankModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm p-4 flex items-center justify-center">
+  <div class="card rounded-3xl p-5 max-w-lg w-full">
+    <div class="flex justify-between items-center mb-4">
+      <h3 id="rankModalTitle" class="text-xl font-black text-amber-300">今日推薦</h3>
+      <button onclick="closeRankDetail()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
+    </div>
+    <div id="rankModalBody" class="space-y-3"></div>
+  </div>
+</div>
+
+
+<div id="memberModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm p-4 flex items-center justify-center">
+  <div class="card rounded-3xl p-5 max-w-3xl w-full max-h-[92vh] overflow-y-auto">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-xl font-black text-amber-300">會員中心</h3>
+      <button onclick="closeMemberCenter()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
+    </div>
+    <div id="memberContent"></div>
+  </div>
+</div>
+
+<div id="authModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm p-4 flex items-center justify-center">
+  <div class="card rounded-3xl p-5 max-w-lg w-full">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-xl font-black text-amber-300">會員登入 / 註冊</h3>
+      <button onclick="closeAuthModal()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
+    </div>
+    <div class="flex gap-2 mb-4">
+      <button id="authLoginTab" class="auth-tab active" onclick="switchAuthTab('login')">登入</button>
+      <button id="authRegisterTab" class="auth-tab" onclick="switchAuthTab('register')">註冊</button>
+    </div>
+    <div id="authMsg" class="hidden rounded-xl border border-emerald-400/20 bg-emerald-400/10 text-emerald-300 px-3 py-2 text-sm font-black mb-3"></div>
+    <div id="authLoginPanel" class="space-y-3">
+      <input id="loginAccount" class="input-field" placeholder="帳號">
+      <input id="loginPassword" type="password" class="input-field" placeholder="密碼">
+      <button class="auth-btn" onclick="submitLogin()">登入</button>
+    </div>
+    <div id="authRegisterPanel" class="space-y-3 hidden">
+      <input id="regAccount" class="input-field" placeholder="帳號">
+      <input id="regPassword" type="password" class="input-field" placeholder="密碼">
+      <input id="regNickname" class="input-field" placeholder="暱稱">
+      <input id="regLine" class="input-field" placeholder="Line ID">
+      <button class="auth-btn" onclick="submitRegister()">立即註冊</button>
+    </div>
+  </div>
+</div>
+
+
+<div id="predictionModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+  <div class="card rounded-3xl p-5 max-w-5xl mx-auto">
+    <div class="flex justify-between items-start gap-3 mb-4">
+      <div>
+        <h3 class="text-xl font-black text-amber-300">賽事預測</h3>
+        <p class="text-sm text-slate-400 mt-1">可選球類，針對每場賽事預測獨贏、讓分、大小分；每日依賽果資料統計命中。</p>
+      </div>
+      <button onclick="closePredictionCenter()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
+    </div>
+    <div id="predictionContent"></div>
+  </div>
+</div>
+
+<div id="allRankModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm p-4 flex items-center justify-center">
+  <div class="card rounded-3xl p-5 max-w-6xl w-full max-h-[92vh] overflow-y-auto">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-xl font-black text-amber-300">排行榜總覽</h3>
+      <button onclick="closeAllRanks()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
+    </div>
+    <div class="modal-rank-wrap">
+      <section class="compact-rank-card">
+        <div class="honor-head"><div><div class="honor-title">🏆 體育預測</div><div class="honor-sub">站內準度排行</div></div><span class="honor-badge">TOP 6</span></div>
+        <div class="simple-rank">
+          <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">水過仙人</div><div class="rank-score">78%</div></div>
+          <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">林口兄弟</div><div class="rank-score">74%</div></div>
+          <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">盤口小王</div><div class="rank-score">71%</div></div>
+          <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">北區老司機</div><div class="rank-score">69%</div></div>
+          <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">VIP小豪</div><div class="rank-score">68%</div></div>
+          <div class="rank-line"><div class="rank-no">6.</div><div class="rank-name">反路阿辰</div><div class="rank-score">66%</div></div>
+        </div>
+      </section>
+      <section class="compact-rank-card">
+        <div class="honor-head"><div><div class="honor-title">🥁 木魚</div><div class="honor-sub">敲木魚累積次數</div></div><span class="honor-badge">TOP 6</span></div>
+        <div class="simple-rank">
+          <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">龍女信徒</div><div class="rank-score">356 下</div></div>
+          <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">夜盤觀察員</div><div class="rank-score">312 下</div></div>
+          <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">林口兄弟</div><div class="rank-score">281 下</div></div>
+          <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">水過仙人</div><div class="rank-score">239 下</div></div>
+          <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">北區老司機</div><div class="rank-score">201 下</div></div>
+          <div class="rank-line"><div class="rank-no">6.</div><div class="rank-name">VIP小豪</div><div class="rank-score">188 下</div></div>
+        </div>
+      </section>
+      <section class="compact-rank-card">
+        <div class="honor-head"><div><div class="honor-title">👵 阿嬤</div><div class="honor-sub">扶阿嬤累積次數</div></div><span class="honor-badge">TOP 6</span></div>
+        <div class="simple-rank">
+          <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">好心人阿凱</div><div class="rank-score">188 次</div></div>
+          <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">水過仙人</div><div class="rank-score">151 次</div></div>
+          <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">北區老司機</div><div class="rank-score">129 次</div></div>
+          <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">龍女信徒</div><div class="rank-score">118 次</div></div>
+          <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">小分仔</div><div class="rank-score">103 次</div></div>
+          <div class="rank-line"><div class="rank-no">6.</div><div class="rank-name">南港強</div><div class="rank-score">96 次</div></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div id="contactModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm p-4 flex items-center justify-center">
+  <div class="card rounded-3xl p-5 max-w-xl w-full">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-xl font-black text-amber-300">聯絡我們</h3>
+      <button onclick="closeContact()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
+    </div>
+    <div class="space-y-3">
+      <div class="contact-block">
+        <div class="contact-title">管理員 砲哥</div>
+        <div class="contact-text">Line： @946sjdhg</div>
+      </div>
+      <div class="contact-block">
+        <div class="contact-title">管理員 龍女</div>
+        <div class="contact-text">Line： @yao88</div>
+      </div>
+      <div class="contact-block">
+        <div class="contact-text">歡迎找我們升級權限<br>服務時間 12:00-09:00<br>時間以外依忙碌程度回覆 敬請見諒</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const leagues={baseball:[["MLB","MLB"],["CPBL","中華職棒"],["NPB","日本職棒"]],basketball:[["NBA","NBA"],["WNBA","WNBA"]],football:[["ECL","歐協杯"],["EPL","英超"],["INT","國際賽"]]};
+const games={
+MLB:[
+{time:"AM 07:40",away:"天使",home:"老虎",money:"老虎勝 ★",spread:"老虎 -1.5",total:"大 8.5 ★",sport:"baseball",conf:[72,62,58]},
+{time:"AM 08:05",away:"太空人",home:"遊騎兵",money:"遊騎兵勝",spread:"遊騎兵 -1.5",total:"小 7.5 ★",sport:"baseball",conf:[64,57,61]},
+{time:"AM 10:10",away:"落磯",home:"道奇",money:"道奇勝 ★",spread:"道奇 -2.5",total:"大 8.5",sport:"baseball",conf:[78,59,55]}],
+CPBL:[{time:"18:35",away:"中信兄弟",home:"味全龍",money:"中信兄弟勝 ★",spread:"中信 -1.5",total:"大 7.5 ★",sport:"baseball",conf:[67,56,60]}],
+NBA:[{time:"08:30",away:"馬刺",home:"雷霆",money:"雷霆勝 ★",spread:"雷霆 -4.5 ★",total:"小 223.5",sport:"basketball",conf:[70,63,56]}],
+ECL:[{time:"AM 03:00",away:"巴列卡諾閃電",home:"水晶宮",money:"水晶宮勝 ★",spread:"水晶宮 -0.5",total:"小 2.5 ★",sport:"football",conf:[66,58,56]}],
+EPL:[{time:"22:00",away:"曼城",home:"切爾西",money:"曼城勝 ★",spread:"曼城 -1",total:"大 2.5",sport:"football",conf:[74,61,57]}]
+};
+const data={
+baseball:{
+topTitle:"雙方先發",
+top:[
+{team:"天使",name:"G. Rodriguez",role:"RHP",stats:[["防禦率","10.61"],["勝","1"],["敗","1"],["三振","9"],["四壞","6"],["WHIP","2.14"]]},
+{team:"老虎",name:"J. Flaherty",role:"RHP",stats:[["防禦率","5.94"],["勝","0"],["敗","6"],["三振","55"],["四壞","29"],["WHIP","1.66"]]}],
+injuries:[["天使","Nolan Schanuel","左腳踝發炎","10日傷兵"],["天使","Yoán Moncada","右膝發炎","10日傷兵"],["天使","Drew Pomeranz","左肘發炎","15日傷兵"],["老虎","主力牛棚投手","手臂疲勞","每日觀察"]],
+metrics:[["打擊率",".228",".233",49,51,"第 28","第 20"],["得分","227","213",54,46,"第 21","第 25"],["全壘打","66","47",58,42,"第 9","第 26"],["上壘率",".314",".315",50,50,"第 20","第 18"],["長打率",".384",".370",52,48,"第 18","第 27"],["盜壘","25","21",54,46,"第 25","第 28"],["防禦率","4.52","3.78",44,56,"第 24","第 11"],["WHIP","1.36","1.24",46,54,"第 22","第 13"]],
+h2h:[["2025/05/28",["天使","0"],["老虎","4"],"老虎勝"],["2025/05/27",["天使","10"],["老虎","6"],"天使勝"],["2024/08/29",["天使","3"],["老虎","6"],"老虎勝"],["2024/08/28",["天使","2"],["老虎","3"],"老虎勝"],["2024/08/27",["天使","5"],["老虎","4"],"天使勝"],["2023/07/28",["天使","1"],["老虎","5"],"老虎勝"],["2023/07/27",["天使","7"],["老虎","6"],"天使勝"]],
+recent:[
+{team:"老虎",side:"主隊",items:[["2025/05/28","vs 天使","4：0","贏"],["2025/05/27","vs 天使","6：10","輸"],["2025/05/25","vs 金鶯","4：1","贏"],["2025/05/24","vs 金鶯","3：5","輸"],["2025/05/23","vs 金鶯","4：7","輸"]]},
+{team:"天使",side:"客隊",items:[["2025/05/28","@ 老虎","0：4","輸"],["2025/05/27","@ 老虎","10：6","贏"],["2025/05/25","vs 遊騎兵","2：1","贏"],["2025/05/24","vs 遊騎兵","5：2","贏"],["2025/05/23","vs 遊騎兵","9：6","贏"]]}]
+},
+basketball:{
+topTitle:"核心球員",
+top:[
+{team:"馬刺",name:"Victor Wembanyama",role:"中鋒",stats:[["得分","25.0"],["籃板","11.5"],["助攻","3.8"],["阻攻","3.8"],["投籃命中率","53.2%"],["三分命中率","36.1%"]]},
+{team:"雷霆",name:"Shai Gilgeous-Alexander",role:"控球後衛",stats:[["得分","31.1"],["籃板","5.5"],["助攻","6.4"],["抄截","1.7"],["投籃命中率","52.0%"],["三分命中率","37.5%"]]}],
+injuries:[["雷霆","Ajay Mitchell","小腿","每日觀察"],["雷霆","Jalen Williams","腿後肌","每日觀察"],["馬刺","輪替後衛","膝部不適","出賽成疑"]],
+metrics:[["場均得分","119.0","119.8",50,51,"第 5","第 3"],["投籃命中率","48.4%","48.3%",51,50,"第 5","第 6"],["罰球命中率","81.7%","78.7%",55,49,"第 3","第 12"],["三分命中率","36.5%","35.9%",53,50,"第 9","第 16"],["場均助攻","25.8","28.1",48,56,"第 19","第 9"],["場均籃板","44.2","46.1",48,55,"第 18","第 8"],["場均失分","109.1","107.3",52,57,"第 11","第 5"],["失誤","12.8","11.3",48,56,"第 17","第 8"]],
+h2h:[["2025/05/23",["馬刺","113"],["雷霆","122"],"雷霆勝"],["2025/05/21",["馬刺","122"],["雷霆","115"],"馬刺勝"],["2025/05/19",["馬刺","115"],["雷霆","122"],"雷霆勝"]],
+recent:[
+{team:"雷霆",side:"主隊",items:[["2025/05/23","vs 馬刺","122：115","贏"],["2025/05/21","vs 馬刺","113：122","輸"],["2025/05/19","vs 馬刺","118：104","贏"],["2025/05/17","vs 金塊","127：121","贏"],["2025/05/15","vs 金塊","105：110","輸"]]},
+{team:"馬刺",side:"客隊",items:[["2025/05/23","@ 雷霆","115：122","輸"],["2025/05/21","@ 雷霆","122：113","贏"],["2025/05/19","@ 雷霆","104：118","輸"],["2025/05/17","vs 湖人","121：127","輸"],["2025/05/15","vs 湖人","110：105","贏"]]}]
+},
+football:{
+topTitle:"核心球員",
+top:[
+{team:"巴列卡諾閃電",name:"Álvaro García",role:"邊鋒",award:"隊內速度型主力，邊路突破與反擊核心",stats:[["場均射門","1.8"],["關鍵傳球","1.3"]]},
+{team:"巴列卡諾閃電",name:"Isi Palazón",role:"進攻中場",award:"隊內定位球與前場串聯核心",stats:[["關鍵傳球","1.7"],["平均評分","7.01"]]},
+{team:"巴列卡諾閃電",name:"Sergio Camello",role:"前鋒",award:"西班牙奧運金牌成員，前場壓迫點",stats:[["場均射門","2.0"],["直接參與","4球"]]},
+{team:"水晶宮",name:"Jean-Philippe Mateta",role:"中鋒",award:"法國奧運代表成員，禁區終結點",stats:[["場均射門","2.4"],["直接參與","5球"]]},
+{team:"水晶宮",name:"Eberechi Eze",role:"進攻中場",award:"英格蘭國腳，FA Cup 冠軍成員",stats:[["關鍵傳球","2.0"],["平均評分","7.35"]]},
+{team:"水晶宮",name:"Michael Olise",role:"邊鋒",award:"法國國腳級邊路創造者，突破與助攻威脅",stats:[["關鍵傳球","2.2"],["成功過人","1.6"]]}],
+injuries:[["水晶宮","主力邊鋒","腳踝","每日觀察"],["巴列卡諾","中場輪替","肌肉不適","出賽成疑"]],
+metrics:[["場均進球","1.3","1.6",46,54,"第 12","第 7"],["場均失球","1.2","0.9",44,58,"第 16","第 5"],["射門","11.4","13.2",48,55,"第 15","第 8"],["射正","4.4","5.2",49,57,"第 14","第 6"],["控球率","49%","54%",48,55,"第 17","第 9"],["傳球成功率","79%","83%",47,55,"第 15","第 8"],["角球","4.7","5.8",48,56,"第 15","第 7"],["黃牌","2.2","1.8",46,52,"第 20","第 12"]],
+h2h:[["2025/05/18",["巴列卡諾","1"],["水晶宮","1"],"平手"],["2024/08/12",["巴列卡諾","0"],["水晶宮","2"],"水晶宮勝"]],
+recent:[
+{team:"水晶宮",side:"主隊",items:[["2025/05/25","vs 狼隊","2：0","贏"],["2025/05/21","vs 富勒姆","1：1","平"],["2025/05/18","vs 紐卡索","3：1","贏"],["2025/05/14","vs 阿森納","0：1","輸"],["2025/05/10","vs 伯恩茅斯","2：1","贏"]]},
+{team:"巴列卡諾閃電",side:"客隊",items:[["2025/05/25","@ 貝提斯","1：1","平"],["2025/05/21","@ 馬略卡","2：1","贏"],["2025/05/18","@ 水晶宮","0：2","輸"],["2025/05/14","vs 奧薩蘇納","0：0","平"],["2025/05/10","vs 塞維利亞","1：0","贏"]]}]
+}
+};
+const rankData={day:[{name:"水過仙人",prob:78,picks:["老虎勝 ★","大 8.5","水晶宮勝"],comments:["今天重點看投手與近期火力。"]},{name:"林口兄弟",prob:74,picks:["雷霆 -4.5 ★","老虎不讓分"],comments:["雷霆與老虎方向都偏硬。"]},{name:"盤口小王",prob:71,picks:["水晶宮勝 ★"],comments:["足球不追太深。"]},{name:"北區老司機",prob:69,picks:["小 7.5"],comments:["投手盤要看臨場。"]},{name:"VIP小豪",prob:68,picks:["中信兄弟勝"],comments:["本土盤可追。"]},{name:"反路阿辰",prob:66,picks:["天使受讓"],comments:["熱門太熱先反。"]},{name:"小分仔",prob:65,picks:["小 223.5"],comments:["節奏可能不快。"]},{name:"老王體育",prob:64,picks:["老虎 -1.5"],comments:["讓分比獨贏更香。"]},{name:"勇闖天關",prob:62,picks:["水晶宮 -0.5"],comments:["主場面還是比較完整。"]},{name:"夜盤觀察員",prob:60,picks:["大 7.5"],comments:["看盤再追。"]}]};
+rankData.week=rankData.day.map((x,i)=>({...x,prob:Math.max(60,x.prob-2+i%3)})); rankData.month=rankData.day.map((x,i)=>({...x,prob:Math.max(60,x.prob-3+i%4)}));
+
+let state={sport:'baseball',league:'MLB'};
+const $=id=>document.getElementById(id);
+
+const LS_USERS='pgai_users_v3';
+const LS_CURRENT='pgai_current_v3';
+const defaultUsers=[
+  {account:'paoge5888',password:'123456',nickname:'砲哥',lineId:'@946sjdhg',role:'體育大神',monthRecommended:30,monthWins:22},
+  {account:'yao88',password:'123456',nickname:'龍女',lineId:'@yao88',role:'體育大神',monthRecommended:28,monthWins:20}
+];
+const baseCounts={'體育萌新':138,'一般會員':226,'VIP會員':318,'體育大神':26};
+let pgGrandmaRight=false;
+let pgGrandmaMoving=false;
+let currentGameIndex=0;
+let punditSort='time';
+
+function init(){
+  ensureUsers();
+  renderAuthUI();
+  renderLeagues();
+  renderGames();
+  renderRank();
+  renderHotPicks();
+  renderMemberCenter();
+  document.querySelectorAll('.sport').forEach(btn=>btn.onclick=()=>{
+    document.querySelectorAll('.sport').forEach(b=>{b.classList.remove('active');b.classList.add('bg-slate-900')});
+    btn.classList.add('active');btn.classList.remove('bg-slate-900');
+    state.sport=btn.dataset.sport;state.league=leagues[state.sport][0][0];
+    renderLeagues();renderGames();
+  });
+}
+
+function loadUsers(){ try{return JSON.parse(localStorage.getItem(LS_USERS)||'[]')}catch(e){return []} }
+function saveUsers(users){ localStorage.setItem(LS_USERS, JSON.stringify(users)); }
+function ensureUsers(){ const users=loadUsers(); let changed=false; defaultUsers.forEach(u=>{ if(!users.find(x=>x.account===u.account)){ users.push(u); changed=true; }}); if(changed) saveUsers(users); }
+function getCurrentUser(){ try{return JSON.parse(localStorage.getItem(LS_CURRENT)||'null')}catch(e){return null} }
+function setCurrentUser(u){ if(u) localStorage.setItem(LS_CURRENT, JSON.stringify(u)); else localStorage.removeItem(LS_CURRENT); }
+function roleEmoji(role){ return role==='體育大神'?'🏆':role==='VIP會員'?'👑':role==='一般會員'?'💎':'🌱'; }
+function roleColor(role){ return role==='體育大神'?'text-fuchsia-300':role==='VIP會員'?'text-amber-300':role==='一般會員'?'text-emerald-300':'text-slate-300'; }
+
+function renderAuthUI(){
+  const me=getCurrentUser();
+  const counts={...baseCounts};
+  if(me) counts[me.role]=(counts[me.role]||0)+1;
+  $('levelStats').innerHTML=`<div class="rounded-full bg-slate-900 border border-slate-700 px-3 py-2 text-slate-300">🌱 體育萌新 <span>${counts['體育萌新']}</span></div><div class="rounded-full bg-emerald-400/10 border border-emerald-400/20 px-3 py-2 text-emerald-300">💎 一般會員 <span>${counts['一般會員']}</span></div><div class="rounded-full bg-amber-400/10 border border-amber-400/20 px-3 py-2 text-amber-300">👑 VIP會員 <span>${counts['VIP會員']}</span></div><div class="rounded-full bg-fuchsia-400/10 border border-fuchsia-400/20 px-3 py-2 text-fuchsia-300">🏆 體育大神 <span>${counts['體育大神']}</span></div>`;
+  $('onlineTotal').textContent=String(Object.values(counts).reduce((a,b)=>a+b,0));
+  const admin=[];
+  if(me&&me.account==='paoge5888') admin.push('<div class="admin-chip">砲哥上線中</div>');
+  if(me&&me.account==='yao88') admin.push('<div class="admin-chip">龍女上線中</div>');
+  $('adminOnline').innerHTML=admin.join('');
+  $('authStatusWrap').innerHTML=me?`<div class="user-chip">${roleEmoji(me.role)} ${me.nickname}</div>`:'';
+  $('logoutBtn').classList.toggle('hidden',!me);
+}
+
+function openAuthModal(mode='login'){ $('authModal').classList.remove('hidden'); switchAuthTab(mode); }
+function closeAuthModal(){ $('authModal').classList.add('hidden'); $('authMsg').classList.add('hidden'); }
+function switchAuthTab(mode){
+  $('authLoginPanel').classList.toggle('hidden',mode!=='login');
+  $('authRegisterPanel').classList.toggle('hidden',mode!=='register');
+  $('authLoginTab').classList.toggle('active',mode==='login');
+  $('authRegisterTab').classList.toggle('active',mode==='register');
+  $('authMsg').classList.add('hidden');
+}
+function showAuthMsg(msg,ok=true){
+  const box=$('authMsg');
+  box.textContent=msg;
+  box.className=`rounded-xl px-3 py-2 text-sm font-black mb-3 ${ok?'border border-emerald-400/20 bg-emerald-400/10 text-emerald-300':'border border-pink-400/20 bg-pink-400/10 text-pink-300'}`;
+  box.classList.remove('hidden');
+}
+function submitRegister(){
+  ensureUsers();
+  const acc=$('regAccount').value.trim(), pw=$('regPassword').value.trim(), nick=$('regNickname').value.trim(), line=$('regLine').value.trim();
+  if(!acc||!pw||!nick||!line) return showAuthMsg('請完整填寫註冊資料',false);
+  const users=loadUsers();
+  if(users.find(u=>u.account===acc)) return showAuthMsg('帳號已存在，請更換',false);
+  const u={account:acc,password:pw,nickname:nick,lineId:line,role:'體育萌新',monthRecommended:Math.floor(Math.random()*12)+6,monthWins:Math.floor(Math.random()*6)+3};
+  users.push(u); saveUsers(users);
+  $('loginAccount').value=acc; $('loginPassword').value=pw;
+  switchAuthTab('login'); showAuthMsg('註冊成功，請直接登入');
+}
+function submitLogin(){
+  ensureUsers();
+  const acc=$('loginAccount').value.trim(), pw=$('loginPassword').value.trim();
+  const found=loadUsers().find(u=>u.account===acc && u.password===pw);
+  if(!found) return showAuthMsg('帳號或密碼錯誤',false);
+  setCurrentUser(found);
+  closeAuthModal(); renderAuthUI(); renderMemberCenter();
+}
+function logout(){ setCurrentUser(null); renderAuthUI(); renderMemberCenter(); }
+
+function openMemberCenter(){ renderMemberCenter(); $('memberModal').classList.remove('hidden'); }
+function closeMemberCenter(){ $('memberModal').classList.add('hidden'); }
+function renderMemberCenter(){
+  const me=getCurrentUser();
+  if(!me){ $('memberContent').innerHTML=`<div class="soft rounded-2xl p-5 text-center"><div class="text-lg font-black text-amber-300">尚未登入</div><p class="text-sm text-slate-400 mt-2">請先登入或註冊，即可查看自己的暱稱、留言場次與預測準確率。</p><button class="auth-btn mt-4" onclick="closeMemberCenter();openAuthModal('login')">立即登入 / 註冊</button></div>`; return; }
+  const rec=Number(me.monthRecommended||0), wins=Number(me.monthWins||0), acc=rec?Math.round(wins/rec*100):0;
+  const history=[{league:'MLB',sport:'baseball',index:0,name:'天使 vs 老虎',finished:true},{league:'NBA',sport:'basketball',index:0,name:'馬刺 vs 雷霆',finished:false},{league:'ECL',sport:'football',index:0,name:'巴列卡諾閃電 vs 水晶宮',finished:false}];
+  $('memberContent').innerHTML=`<div class="meta-grid mb-4"><div class="meta-card"><div class="label">我的暱稱</div><div class="value text-amber-300">${me.nickname}</div></div><div class="meta-card"><div class="label">我的等級</div><div class="value ${roleColor(me.role)}">${roleEmoji(me.role)} ${me.role}</div></div><div class="meta-card"><div class="label">本月推薦</div><div class="value text-emerald-300">${rec} 場</div></div><div class="meta-card"><div class="label">本月預測準確率</div><div class="value text-sky-300">${acc}%</div><div class="text-xs text-slate-500 font-black mt-1">${wins} 中 / ${rec} 場</div></div></div><div class="soft rounded-2xl p-4"><div class="text-slate-500 text-xs font-black mb-3">留言過的場次</div><div class="grid gap-2">${history.map(h=>h.finished?`<div class="member-done"><span>${h.name}</span><b>已完賽</b></div>`:`<button class="member-link text-left" onclick="jumpToGame('${h.league}','${h.sport}',${h.index})"><span>${h.name}</span><b class="text-emerald-300">前往查看</b></button>`).join('')}</div></div>`;
+}
+
+function jumpToGame(league,sport,index){ closeMemberCenter(); state.sport=sport; state.league=league; renderLeagues(); renderGames(); setTimeout(()=>{ document.getElementById('gamesBlock').scrollIntoView({behavior:'smooth'}); setTimeout(()=>openGame(index,'board'),250); },120); }
+
+function betUrl(){ const href=location.href.toLowerCase(); const cfg=window.SPORTS_SITE_CONFIG||{}; if(href.includes('yao88')||href.includes('longnv')||href.includes('dragon')) return cfg.LONGNV_BET_URL || 'https://money777.mw168.online'; return cfg.PAOGE_BET_URL || 'https://money888.mw168.online'; }
+function openBet(){ window.open(betUrl(),'_blank'); }
+
+function renderLeagues(){
+  $('leagues').innerHTML=leagues[state.sport].map(([k,n])=>`<button class="league ${state.league===k?'active':'bg-slate-900'} rounded-2xl border border-slate-700 px-4 py-2 font-black text-sm" data-l="${k}">${n}</button>`).join('');
+  document.querySelectorAll('.league').forEach(btn=>btn.onclick=()=>{state.league=btn.dataset.l;renderLeagues();renderGames();});
+}
+function renderGames(){
+  const leagueName=leagues[state.sport].find(x=>x[0]===state.league)?.[1]||state.league;
+  $('leagueTitle').textContent=leagueName+'｜今日賽事';
+  const list=games[state.league]||games.MLB;
+  $('games').innerHTML=list.map((g,i)=>`<article class="soft rounded-2xl p-3"><div class="grid xl:grid-cols-[minmax(0,1fr)_320px_240px] gap-3 items-center"><div class="min-w-0"><div class="flex items-center gap-2 text-xs text-slate-500 font-black"><span>${g.time}</span><span>•</span><span>${leagueName}</span></div><h3 class="text-lg font-black truncate mt-1">${g.away} vs ${g.home}</h3></div><div class="grid grid-cols-3 gap-2">${marketMini('獨贏',g.money,'emerald')}${marketMini('讓分',g.spread,'blue')}${marketMini('大小',g.total,'pink')}</div><div class="action-row"><button onclick="openGame(${i},'data')" class="rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black px-3 py-3">查看數據</button><button onclick="openGame(${i},'board')" class="rounded-xl border border-slate-700 bg-slate-950 text-slate-100 font-black px-3 py-3">留言板</button></div></div></article>`).join('');
+}
+function marketMini(label,val,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-xl border ${cls} p-2"><div class="text-[11px] font-black">${label}</div><div class="market mt-1">${val}</div></div>`; }
+
+function closeGame(){ $('gameModal').classList.add('hidden'); document.body.classList.remove('modal-open'); }
+function openGame(i,tab='data'){
+  currentGameIndex=i;
+  const g=(games[state.league]||games.MLB)[i], d=data[g.sport];
+  $('gameModal').classList.remove('hidden'); document.body.classList.add('modal-open');
+  $('modalLeague').textContent=`${state.league}｜${g.time}`;
+  $('modalTitle').textContent=`${g.away} vs ${g.home}`;
+  const dataHtml=`${summaryCards(g)}${section(d.topTitle,topBlock(d.top,g.sport))}${section('傷員狀況',injuries(d.injuries,g.sport))}${section('雙方對比',comparison(d.metrics,g.away,g.home))}${section('雙方歷史對戰',h2h(d.h2h))}${section('雙方近期賽況',recent(d.recent))}`;
+  const boardHtml=`${section('',pundits(g))}${section('',playerComments())}`;
+  $('modalBody').innerHTML=`<div class="comment-tabs"><button class="comment-tab ${tab==='data'?'active':''}" onclick="openGame(${i},'data')">查看數據</button><button class="comment-tab ${tab==='board'?'active':''}" onclick="openGame(${i},'board')">留言板</button></div>${tab==='data'?dataHtml:boardHtml}`;
+}
+function section(title,body){ return `<section class="soft rounded-2xl p-4">${title?`<h3 class="section-title">${title}</h3>`:''}${body}</section>`; }
+function summaryCards(g){ return `<section class="grid lg:grid-cols-3 gap-4">${mainMarket('獨贏參考',g.money,g.conf[0],'大眾參考方向','emerald')}${mainMarket('讓分盤',g.spread,g.conf[1],'過盤參考率','blue')}${mainMarket('大小分',g.total,g.conf[2],'方向參考率','pink')}</section>`; }
+function mainMarket(title,val,pct,sub,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-2xl border ${cls} p-4"><div class="text-xs font-black">${title}</div><div class="market-big mt-2">${val}</div><div class="flex justify-between mt-4 text-sm font-black"><span>${sub}</span><span>${pct}%</span></div><div class="conf mt-2"><i style="width:${pct}%"></i></div></div>`; }
+function topBlock(rows,sport){ if(sport==='football'){ const left=rows.slice(0,3), right=rows.slice(3,6); return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-a mb-3">${left[0].team}</div><div class="space-y-3">${left.map((r,idx)=>footballPlayer(r,idx+1,'a')).join('')}</div></div><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-b mb-3">${right[0].team}</div><div class="space-y-3">${right.map((r,idx)=>footballPlayer(r,idx+1,'b')).join('')}</div></div></div>`; } return `<div class="grid md:grid-cols-2 gap-4">${rows.map(r=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="text-sm text-slate-500">${r.team}</div><div class="text-xl font-black mt-1">${r.name} <span class="hero-tag">${r.role}</span></div><div class="inline-stats mt-4">${r.stats.map(s=>`<div class="inline-stat"><div class="v">${s[1]}</div><div class="k">${s[0]}</div></div>`).join('')}</div></div>`).join('')}</div>`; }
+function footballPlayer(r,no,tone){ return `<div class="rounded-2xl ${tone==='a'?'bg-sky-400/5 border-sky-400/20':'bg-amber-400/5 border-amber-400/20'} border p-4"><div class="flex items-center justify-between gap-3"><div><div class="text-sm font-black ${tone==='a'?'text-blue-300':'text-amber-300'}">第 ${no} 核心</div><div class="text-lg font-black mt-1">${r.name}</div></div><span class="hero-tag">${r.role}</span></div><div class="text-xs text-slate-400 mt-2 leading-5">${r.award||''}</div></div>`; }
+function injuries(rows,sport){ if(sport==='baseball'){ const teams=[...new Set(rows.map(r=>r[0]))]; return `<div class="grid md:grid-cols-2 gap-4">${teams.map((team,idx)=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="font-black ${idx===0?'text-blue-300':'text-amber-300'} mb-3">${team}</div><div class="space-y-2">${rows.filter(r=>r[0]===team).map(r=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 flex justify-between gap-3"><div><div class="font-black text-sm">${r[1]}</div><div class="text-xs text-slate-400 mt-1">${r[2]}</div></div><div class="text-xs text-pink-300 font-black shrink-0">${r[3]}</div></div>`).join('')}</div></div>`).join('')}</div>`; } return `<div class="grid md:grid-cols-2 gap-2">${rows.map(r=>`<div class="rounded-xl bg-slate-900/75 border border-slate-800 p-3 flex justify-between gap-3"><div><div class="font-black">${r[0]}｜${r[1]}</div><div class="text-sm text-slate-400 mt-1">${r[2]}</div></div><div class="text-xs text-pink-300 font-black shrink-0">${r[3]}</div></div>`).join('')}</div>`; }
+function comparison(metrics,away,home){ return `<div class="space-y-4">${metrics.map(m=>`<div><div class="grid grid-cols-[78px_1fr_78px] md:grid-cols-[130px_1fr_130px] gap-3 items-center"><div><div class="font-black text-blue-300">${m[1]}</div><div class="text-[11px] text-slate-500">${m[5]}</div></div><div><div class="flex justify-between text-sm font-black mb-2"><span>${away}</span><span>${m[0]}</span><span>${home}</span></div><div class="comp-bar" style="--l:${m[3]}%;--r:${m[4]}%"><span class="midline"></span></div></div><div class="text-right"><div class="font-black text-amber-300">${m[2]}</div><div class="text-[11px] text-slate-500">${m[6]}</div></div></div></div>`).join('')}</div>`; }
+function h2h(rows){ const split=Math.ceil(rows.length/2), left=rows.slice(0,split), right=rows.slice(split); let merged=[]; for(let i=0;i<split;i++){ merged.push([left[i],right[i]||null]); } return `<div class="space-y-3">${merged.map(pair=>`<div class="grid md:grid-cols-2 gap-3">${pair.map(r=>r?`<div class="soft rounded-2xl p-4"><div class="grid grid-cols-[104px_1fr_70px] gap-3 items-center"><div><span class="date-badge">${r[0]}</span></div><div class="space-y-2"><div class="flex justify-between text-base"><span>${r[1][0]}</span><b>${r[1][1]}</b></div><div class="flex justify-between text-base"><span>${r[2][0]}</span><b>${r[2][1]}</b></div></div><div class="${r[3].includes('勝')?'text-emerald-300':r[3]==='平手'?'text-slate-300':'text-emerald-300'} text-sm font-black text-right">${r[3]}</div></div></div>`:`<div></div>`).join('')}</div>`).join('')}</div>`; }
+function recent(rows){ return `<div class="grid md:grid-cols-2 gap-4">${rows.map((r,idx)=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="flex items-center justify-between mb-3"><div class="font-black ${idx===0?'text-amber-300':'text-blue-300'}">${r.team}</div><span class="hero-tag">${r.side}</span></div><div class="space-y-2">${r.items.map(x=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 grid grid-cols-[110px_1fr_72px_40px] items-center gap-2"><span class="date-badge">${x[0]}</span><span class="text-sm text-slate-300 font-bold">${x[1]}</span><span class="font-black text-base text-right">${x[2]}</span><span class="${x[3]==='贏'?'win':x[3]==='輸'?'loss':'draw'} text-right">${x[3]}</span></div>`).join('')}</div></div>`).join('')}</div>`; }
+
+function pundits(g){
+  const rows=[
+    {name:'林口兄弟',pick:`推 ${g.spread} 過`,time:'13:05',acc:74,body:'盤口順著走，主隊方向比較穩。'},
+    {name:'水過仙人',pick:`推 ${g.total} 過`,time:'13:18',acc:78,body:'看好節奏偏慢，小分更有空間。'},
+    {name:'盤口小王',pick:`推 ${g.money.replace(' ★','')} 過`,time:'13:32',acc:71,body:'主力狀態在線，獨贏值得參考。'},
+    {name:'北區老司機',pick:'推 臨場盤 過',time:'13:46',acc:69,body:'等最後盤口確認再出手比較好。'},
+    {name:'夜盤觀察員',pick:'推 受讓盤 過',time:'14:03',acc:60,body:'受讓盤保守一點，容錯相對高。'}
+  ];
+  const sorted=[...rows].sort((a,b)=>punditSort==='accuracy'?b.acc-a.acc:a.time.localeCompare(b.time));
+  return `<div class="board-head"><div class="board-title">各路好手留言板</div><button class="board-btn" onclick="openCommentComposer('各路好手留言板')">我要留言</button></div><div class="sort-tools"><button class="sort-btn ${punditSort==='time'?'active':''}" onclick="punditSort='time';openGame(currentGameIndex,'board')">時間排序</button><button class="sort-btn ${punditSort==='accuracy'?'active':''}" onclick="punditSort='accuracy';openGame(currentGameIndex,'board')">準確率排序</button></div><div class="comment-list">${sorted.slice(0,3).map((r,idx)=>`<article class="comment-card"><div class="top"><div class="name">🔥 ${r.name}</div><div class="acc-pill">準確率 ${r.acc}%</div></div><div class="pick">${r.pick}</div><div class="body">${r.body}</div><div class="time">留言時間｜${r.time}　排序第 ${idx+1}</div></article>`).join('')}</div><div class="board-pager"><button class="board-page-btn active">第 1 頁</button><button class="board-page-btn" onclick="alert('展示版：第二頁留言會在正式版串接資料庫')">第 2 頁</button></div>`;
+}
+function playerComments(){ const me=getCurrentUser(); const rows=[[me?me.nickname:'南港強',me?`${roleEmoji(me.role)} ${me.role}`:'👑 VIP會員','這場我先看盤口，不追太深。','14:12'],['小分仔','💎 一般會員','大小分我等臨場再決定。','14:27'],['東區老鐵','🌱 體育萌新','我想跟大分，但會等臨場。','14:39'],['VIP小豪','👑 VIP會員','讓分盤我先觀望，獨贏比較穩。','14:51']]; return `<div class="board-head"><div class="board-title">玩家留言板</div><button class="board-btn" onclick="openCommentComposer('玩家留言板')">我要留言</button></div><div class="comment-list">${rows.slice(0,3).map((r)=>`<article class="comment-card"><div class="top"><div class="name">${r[0]}</div><div class="tag">${r[1]}</div></div><div class="body">${r[2]}</div><div class="time">留言時間｜${r[3]}</div></article>`).join('')}</div><div class="board-pager"><button class="board-page-btn active">第 1 頁</button><button class="board-page-btn" onclick="alert('展示版：第二頁留言會在正式版串接資料庫')">第 2 頁</button></div>`; }
+function openCommentComposer(board){ alert(board+'｜正式版會跳出留言輸入框並寫入資料庫'); }
+
+function renderRank(){ const key=$('rankTab').value,arr=rankData[key]; $('rankPodium').innerHTML=`${podium(arr[1],2,'podium-2')}${podium(arr[0],1,'podium-1')}${podium(arr[2],3,'podium-3')}`; $('rankList').innerHTML=arr.slice(3,10).map((r,idx)=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="flex justify-between items-center gap-3"><button onclick='openRankDetail(${JSON.stringify(r).replace(/'/g,"&#39;")})' class="font-black text-left click-name">${idx+4}. ${r.name}</button><span class="text-emerald-300 font-black">機率 ${r.prob}%</span></div></div>`).join(''); }
+function podium(r,num,cls){ return `<div class="podium-col ${cls}"><div class="text-3xl font-black ${num===1?'text-yellow-300':num===2?'text-slate-200':'text-orange-300'}">${num}</div><button onclick='openRankDetail(${JSON.stringify(r).replace(/'/g,"&#39;")})' class="font-black mt-2 click-name">${r.name}</button><div class="text-emerald-300 font-black mt-1">機率 ${r.prob}%</div></div>`; }
+function openRankDetail(data){ const d=typeof data==='string'?JSON.parse(data):data; $('rankModal').classList.remove('hidden'); $('rankModalTitle').textContent=d.name+'｜今日推薦與留言'; $('rankModalBody').innerHTML=`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="text-emerald-300 font-black">參考機率 ${d.prob}%</div><ul class="list-disc pl-5 mt-2 text-sm text-slate-300">${d.picks.map(p=>`<li>${p}</li>`).join('')}</ul></div><div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="font-black text-amber-300">留言</div>${d.comments.map(c=>`<div class="rounded-lg bg-slate-900 border border-slate-800 p-2 text-sm text-slate-300 mt-2">${c}</div>`).join('')}</div>`; }
+function closeRankDetail(){ $('rankModal').classList.add('hidden'); }
+function renderHotPicks(){ $('hotPicks').innerHTML=[["🔥 水過仙人","推 大 8.5 過","78%"],["🔥 林口兄弟","推 老虎 -1.5 過","74%"],["🔥 盤口小王","推 水晶宮勝 過","71%"]].map(x=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="flex justify-between"><b class="text-amber-300">${x[0]}</b><span class="text-emerald-300 font-black">${x[2]}</span></div><div class="text-blue-300 font-black mt-1">${x[1]}</div></div>`).join(''); }
+function openAllRanks(){ $('allRankModal').classList.remove('hidden'); }
+function closeAllRanks(){ $('allRankModal').classList.add('hidden'); }
+function openContact(){ $('contactModal').classList.remove('hidden'); }
+function closeContact(){ $('contactModal').classList.add('hidden'); }
+
+
+function allGamesFlat(){ const rows=[]; Object.keys(games).forEach(league=>{ (games[league]||[]).forEach((g,idx)=>rows.push({league,idx,...g})); }); return rows; }
+function totalLineValue(total){ const m=String(total||'').match(/(\d+(?:\.\d+)?)/); return m?m[1]:'盤口'; }
+function predKey(g){ return `${g.league}_${g.idx}_${g.away}_${g.home}`; }
+function loadPreds(){ try{return JSON.parse(localStorage.getItem('pgai_predictions_v1')||'{}')}catch(e){return {}} }
+function savePreds(p){ localStorage.setItem('pgai_predictions_v1',JSON.stringify(p)); }
+function openPredictionCenter(){ renderPredictionCenter(); $('predictionModal').classList.remove('hidden'); }
+function closePredictionCenter(){ $('predictionModal').classList.add('hidden'); }
+function savePrediction(key,choice){ const p=loadPreds(); p[key]={choice,at:new Date().toLocaleString('zh-TW'),status:'待結算'}; savePreds(p); renderPredictionCenter(); }
+function renderPredictionCenter(){ const preds=loadPreds(); const list=allGamesFlat(); const count=Object.keys(preds).length; $('predictionContent').innerHTML=`<div class="pred-summary"><div class="box"><div class="label">今日已預測</div><div class="val">${count} 場</div></div><div class="box"><div class="label">昨日結算</div><div class="val">5 過 3</div></div><div class="box"><div class="label">昨日準確率</div><div class="val">60%</div></div></div><div class="grid md:grid-cols-2 gap-3">${list.map(g=>{ const key=predKey(g); const line=totalLineValue(g.total); const saved=preds[key]; return `<article class="pred-card"><div class="pred-top"><div><div class="pred-game">${g.away} vs ${g.home}</div><div class="pred-line">${g.league}｜運彩大小分盤口 ${line}</div></div><div class="pred-status">${saved?`已選 ${saved.choice}`:'尚未預測'}</div></div><div class="pred-actions"><button class="pred-btn ${saved&&saved.choice==='大 '+line?'active':''}" onclick="savePrediction('${key}','大 ${line}')">大 ${line}</button><button class="pred-btn ${saved&&saved.choice==='小 '+line?'active':''}" onclick="savePrediction('${key}','小 ${line}')">小 ${line}</button></div><div class="text-xs text-slate-500 font-black">每日賽後依國際賽果資料自動統計是否命中。</div></article>`; }).join('')}</div>`; }
+
+function knockWood(){ const c=$('woodCount'); c.textContent=String(Number(c.textContent)+1); const f=$('woodFloat'); f.classList.remove('play'); void f.offsetWidth; f.classList.add('play'); }
+function moveGrandma(){ const g=$('grandma'), btn=$('grandmaBtn'), c=$('grandmaCount'), msg=$('grandmaMsg'), bubble=$('grandmaBubble'); if(pgGrandmaMoving) return; pgGrandmaMoving=true; btn.disabled=true; btn.classList.add('opacity-70','cursor-not-allowed'); pgGrandmaRight=!pgGrandmaRight; g.classList.toggle('right',pgGrandmaRight); bubble.classList.remove('hidden'); bubble.classList.toggle('right',pgGrandmaRight); const words=Math.random()>.5?'祝你開轟':'謝謝好心人'; bubble.textContent=words; msg.textContent=words; c.textContent=String(Number(c.textContent)+1); btn.textContent=pgGrandmaRight?'扶她回來':'扶阿嬤過馬路'; setTimeout(()=>{ pgGrandmaMoving=false; btn.disabled=false; btn.classList.remove('opacity-70','cursor-not-allowed'); setTimeout(()=>bubble.classList.add('hidden'),900); },800); }
+
+init();
+</script>
+
+
+<script>
+let predictionSportFilter = 'all';
+function sportLabel(s){ return s==='baseball'?'棒球':s==='basketball'?'籃球':s==='football'?'足球':'全部'; }
+function allGamesFlat(){ const rows=[]; Object.keys(games).forEach(league=>{ (games[league]||[]).forEach((g,idx)=>rows.push({league,idx,...g})); }); return rows; }
+function totalLineValue(total){ const m=String(total||'').match(/(\d+(?:\.\d+)?)/); return m?m[1]:'盤口'; }
+function predKey(g,market){ return `${g.league}_${g.idx}_${g.away}_${g.home}_${market}`; }
+function loadPreds(){ try{return JSON.parse(localStorage.getItem('pgai_predictions_v2')||'{}')}catch(e){return {}} }
+function savePreds(p){ localStorage.setItem('pgai_predictions_v2',JSON.stringify(p)); }
+function openPredictionCenter(){ renderPredictionCenter(); $('predictionModal').classList.remove('hidden'); }
+function closePredictionCenter(){ $('predictionModal').classList.add('hidden'); }
+function setPredictionSport(s){ predictionSportFilter=s; renderPredictionCenter(); }
+function savePrediction(key,choice,market){ const p=loadPreds(); p[key]={choice,market,at:new Date().toLocaleString('zh-TW'),status:'待結算'}; savePreds(p); renderPredictionCenter(); }
+function predBtn(key,choice,market,saved){ const active=saved&&saved.choice===choice; return `<button class="pred-btn ${active?'active':''}" onclick="savePrediction('${key}','${choice.replace(/'/g,"&#39;")}','${market}')">${choice}</button>`; }
+function renderMarketBlock(g,market,title,line,choices){ const key=predKey(g,market); const saved=loadPreds()[key]; return `<div class="pred-market"><div class="pred-market-head"><div class="pred-market-title">${title}</div><div class="pred-market-line">${line}</div></div><div class="pred-save-row">${choices.map(c=>predBtn(key,c,market,saved)).join('')}</div><div class="pred-note">${saved?`已選：${saved.choice}｜${saved.status}`:'尚未預測'}</div></div>`; }
+function renderPredictionCenter(){
+  const preds=loadPreds();
+  const all=allGamesFlat();
+  const list=predictionSportFilter==='all'?all:all.filter(g=>g.sport===predictionSportFilter);
+  const count=Object.keys(preds).length;
+  const filterBtns=['all','baseball','basketball','football'].map(s=>`<button class="pred-filter-btn ${predictionSportFilter===s?'active':''}" onclick="setPredictionSport('${s}')">${sportLabel(s)}</button>`).join('');
+  $('predictionContent').innerHTML=`<div class="pred-filter">${filterBtns}</div><div class="pred-summary"><div class="box"><div class="label">今日已預測</div><div class="val">${count} 筆</div></div><div class="box"><div class="label">昨日結算</div><div class="val">5 過 3</div></div><div class="box"><div class="label">昨日準確率</div><div class="val">60%</div></div></div><div class="grid md:grid-cols-2 gap-3">${list.map(g=>{
+    const totalLine=totalLineValue(g.total);
+    const spreadLine=String(g.spread||'讓分盤');
+    const moneyChoices=[`${g.away} 勝`,`${g.home} 勝`];
+    const spreadChoices=[`${spreadLine} 過`,`對面受讓過`];
+    const totalChoices=[`大 ${totalLine}`,`小 ${totalLine}`];
+    return `<article class="pred-card"><div class="pred-top"><div><div class="pred-game">${g.away} vs ${g.home}</div><div class="pred-line">${g.league}｜${sportLabel(g.sport)}</div></div><div class="pred-status">運彩盤口</div></div>${renderMarketBlock(g,'moneyline','獨贏','選擇勝方',moneyChoices)}${renderMarketBlock(g,'spread','讓分',spreadLine,spreadChoices)}${renderMarketBlock(g,'total','大小分','大小 '+totalLine,totalChoices)}<div class="text-xs text-slate-500 font-black">每日賽後依國際賽果資料自動統計是否命中。</div></article>`;
+  }).join('')}</div>`;
+}
+function playWoodSound(){
+  try{
+    const AudioCtx=window.AudioContext||window.webkitAudioContext;
+    if(!AudioCtx) return;
+    const ctx=new AudioCtx();
+    const osc=ctx.createOscillator();
+    const gain=ctx.createGain();
+    osc.type='triangle';
+    osc.frequency.setValueAtTime(520,ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(170,ctx.currentTime+0.09);
+    gain.gain.setValueAtTime(0.0001,ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.28,ctx.currentTime+0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.16);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime+0.18);
+    setTimeout(()=>ctx.close&&ctx.close(),260);
+  }catch(e){}
+}
+function knockWood(){
+  const c=$('woodCount'); c.textContent=String(Number(c.textContent)+1);
+  const f=$('woodFloat'); if(f){ f.classList.remove('play'); void f.offsetWidth; f.classList.add('play'); }
+  const img=document.querySelector('.woodfish-img'); if(img){ img.classList.remove('hit'); void img.offsetWidth; img.classList.add('hit'); }
+  playWoodSound();
+}
+</script>
+
+
+<script>
+// === Production site mode: one codebase, two public sites ===
+const SITE_CONFIGS={
+  paoge:{key:'paoge',title:'砲哥體育AI數據統整系統',subtitle:'歡迎交流，有任何疑問歡迎聯繫管理員',manager:'砲哥',line:'@946sjdhg',betUrl:(window.SPORTS_SITE_CONFIG?.PAOGE_BET_URL || 'https://money888.mw168.online')},
+  longnv:{key:'longnv',title:'龍女體育AI數據統整系統',subtitle:'歡迎交流，有任何疑問歡迎聯繫管理員',manager:'龍女',line:'@yao88',betUrl:(window.SPORTS_SITE_CONFIG?.LONGNV_BET_URL || 'https://money777.mw168.online')}
+};
+function getSiteMode(){
+  const qs=new URLSearchParams(location.search).get('site');
+  const host=(location.hostname+location.pathname).toLowerCase();
+  if(qs==='longnv'||host.includes('yao88.sports.com')||host.includes('yao88')||host.includes('longnv')||host.includes('dragon')) return 'longnv';
+  if(qs==='paoge'||host.includes('paoge.sports.com')||host.includes('paoge')) return 'paoge';
+  return 'paoge';
+}
+function siteConfig(){ return SITE_CONFIGS[getSiteMode()]||SITE_CONFIGS.paoge; }
+function applySiteBranding(){
+  const cfg=siteConfig();
+  const title=document.querySelector('header h1'); if(title) title.textContent=cfg.title;
+  const sub=document.querySelector('header h1 + p'); if(sub) sub.textContent=cfg.subtitle;
+  document.title=cfg.title;
+  if(!document.getElementById('siteModeBadge')){
+    const nav=document.querySelector('header nav');
+    if(nav) nav.insertAdjacentHTML('beforeend',`<span id="siteModeBadge" class="site-mode-badge">${cfg.manager}版本</span>`);
+  }else document.getElementById('siteModeBadge').textContent=cfg.manager+'版本';
+}
+function betUrl(){ return siteConfig().betUrl; }
+function openBet(){
+  const url=betUrl();
+  if(url.includes('_HERE')) { alert('尚未填入'+siteConfig().manager+'的娛樂城連結'); return; }
+  window.open(url,'_blank');
+}
+function openContact(){
+  const cfg=siteConfig();
+  if(typeof $==='function' && $('contactModal')){
+    $('contactModal').classList.remove('hidden');
+    const body=$('contactModal').querySelector('.space-y-3');
+    if(body){
+      body.innerHTML=`<div class="contact-block"><div class="contact-title">管理員 ${cfg.manager}</div><div class="contact-text">Line： ${cfg.line}</div></div><div class="contact-block"><div class="contact-text">歡迎找我們升級權限<br>服務時間 12:00-09:00<br>時間以外依忙碌程度回覆 敬請見諒</div></div>`;
+    }
+  }
+}
+function cleanMarketText(s){ return String(s||'').replace(/[★☆]/g,'').replace(/\s*過/g,'').replace(/\s+/g,' ').trim(); }
+function extractNumber(s){ const m=String(s||'').match(/(\d+(?:\.\d+)?)/); return m?m[1]:'盤口'; }
+function oppositeSpread(g){ const n=extractNumber(g.spread); return `${g.spread&&String(g.spread).includes(g.home)?g.away:g.home} +${n}`; }
+// Override prediction center so it only shows clean 運彩盤口：獨贏 / 讓分 / 大小分, no ★ and no 過.
+function renderPredictionCenter(){
+  const preds=loadPreds();
+  const all=allGamesFlat();
+  const list=predictionSportFilter==='all'?all:all.filter(g=>g.sport===predictionSportFilter);
+  const count=Object.keys(preds).length;
+  const filterBtns=['all','baseball','basketball','football'].map(s=>`<button class="pred-filter-btn ${predictionSportFilter===s?'active':''}" onclick="setPredictionSport('${s}')">${sportLabel(s)}</button>`).join('');
+  $('predictionContent').innerHTML=`<div class="pred-filter">${filterBtns}</div><div class="pred-summary"><div class="box"><div class="label">今日已預測</div><div class="val">${count} 筆</div></div><div class="box"><div class="label">待結算</div><div class="val">賽後統計</div></div><div class="box"><div class="label">盤口限制</div><div class="val">運彩盤</div></div></div><div class="grid md:grid-cols-2 gap-3">${list.map(g=>{
+    const totalLine=extractNumber(g.total);
+    const spreadLine=cleanMarketText(g.spread||'讓分盤');
+    const moneyChoices=[`${g.away} 獨贏`,`${g.home} 獨贏`];
+    const spreadChoices=[spreadLine,oppositeSpread(g)];
+    const totalChoices=[`大 ${totalLine}`,`小 ${totalLine}`];
+    return `<article class="pred-card"><div class="pred-top"><div><div class="pred-game">${g.away} vs ${g.home}</div><div class="pred-line">${g.league}｜${sportLabel(g.sport)}</div></div><div class="pred-status">只限運彩盤口</div></div>${renderMarketBlock(g,'moneyline','獨贏','選擇勝方',moneyChoices)}${renderMarketBlock(g,'spread','讓分',spreadLine,spreadChoices)}${renderMarketBlock(g,'total','大小分','大小 ${totalLine}',totalChoices)}<div class="text-xs text-slate-500 font-black">每日賽後依賽果資料統計是否命中。</div></article>`;
+  }).join('')}</div>`;
+}
+function renderMarketBlock(g,market,title,line,choices){ const key=predKey(g,market); const saved=loadPreds()[key]; return `<div class="pred-market"><div class="pred-market-head"><div class="pred-market-title">${title}</div><div class="pred-market-line clean">${cleanMarketText(line)}</div></div><div class="pred-save-row">${choices.map(c=>predBtn(key,cleanMarketText(c),market,saved)).join('')}</div><div class="pred-note">${saved?`已選：${cleanMarketText(saved.choice)}｜${saved.status}`:'尚未預測'}</div></div>`; }
+applySiteBranding();
+</script>
+
+</body>
+</html>
