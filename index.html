@@ -134,11 +134,6 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
 #dbStatus{display:inline-flex;margin-left:6px}
 
 
-.synced-rank-row{display:flex;justify-content:space-between;align-items:center;gap:10px;border-radius:12px;background:#020617;border:1px solid rgba(148,163,184,.12);padding:10px 12px}
-.synced-rank-row .name{font-size:.88rem;font-weight:900;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.synced-rank-row .score{font-size:.86rem;font-weight:950;color:#34d399;white-space:nowrap}
-
-
 .simple-rank .synced-rank-line{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:8px;border-radius:12px;background:#020617;border:1px solid rgba(148,163,184,.12);padding:10px 12px}
 .simple-rank .synced-rank-line .rank-no{color:#fbbf24;font-weight:950}
 .simple-rank .synced-rank-line .rank-name{color:#e5e7eb;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1022,152 +1017,58 @@ setInterval(dbRefreshStatus, 30000);
 
 
 <script>
-/* ===== v22 interaction sync: load woodfish / grandma counts from Supabase after F5 ===== */
-function currentInteractionIdentity(){
+/* ===== v24 interaction persistence patch =====
+   Supabase starter table has NOT NULL column `type`.
+   Earlier versions wrote only `interaction_type`, so inserts could fail.
+*/
+function v24Who(){
   const me = getCurrentUser && getCurrentUser();
-  return {
-    account: me ? me.account : 'guest_device',
-    nickname: me ? me.nickname : '訪客'
-  };
+  if(me) return {account:me.account,nickname:me.nickname};
+  let gid = localStorage.getItem('pgai_guest_id');
+  if(!gid){ gid='g'+Math.random().toString(36).slice(2,10); localStorage.setItem('pgai_guest_id',gid); }
+  return {account:'guest_'+gid,nickname:'訪客'};
 }
-async function fetchInteractionRows(type){
+async function v24Rows(typeName){
   try{
     return await sbFetch('interaction_counts',{
-      query:`?interaction_type=eq.${encodeURIComponent(type)}&select=*&order=count.desc&limit=10`
+      query:`?type=eq.${encodeURIComponent(typeName)}&select=account,nickname,count,type,updated_at&limit=1000`
     });
   }catch(e){
-    console.warn('fetchInteractionRows failed', type, e);
+    console.warn('v24Rows failed', typeName, e);
     return [];
   }
 }
-async function interactionTotal(type){
-  const rows = await fetchInteractionRows(type);
-  return rows.reduce((sum,r)=>sum+Number(r.count||0),0);
-}
-function renderInteractionRank(targetId, rows, unit){
-  const box = document.getElementById(targetId);
-  if(!box) return;
-  const top = rows.slice(0,6);
-  if(!top.length){
-    box.innerHTML = `<div class="synced-rank-row"><span class="name">目前尚無排行</span><span class="score">0 ${unit}</span></div>`;
-    return;
-  }
-  box.innerHTML = top.map((r,idx)=>`
-    <div class="synced-rank-row">
-      <span class="name">${idx+1}. ${r.nickname || r.account || '匿名'}</span>
-      <span class="score">${Number(r.count||0)} ${unit}</span>
-    </div>
-  `).join('');
-}
-async function refreshInteractionCounters(){
-  if(!sbReady()) return;
-  const woodRows = await fetchInteractionRows('woodfish');
-  const grandmaRows = await fetchInteractionRows('grandma');
-  const woodTotal = woodRows.reduce((sum,r)=>sum+Number(r.count||0),0);
-  const grandmaTotal = grandmaRows.reduce((sum,r)=>sum+Number(r.count||0),0);
-  if($('woodCount')) $('woodCount').textContent = String(woodTotal || 0);
-  if($('grandmaCount')) $('grandmaCount').textContent = String(grandmaTotal || 0);
-  renderInteractionRank('woodRankList', woodRows, '下');
-  renderInteractionRank('grandmaRankList', grandmaRows, '次');
-}
-async function upsertInteraction(type){
-  const who = currentInteractionIdentity();
-  try{
-    const rows = await sbFetch('interaction_counts',{
-      query:`?account=eq.${encodeURIComponent(who.account)}&interaction_type=eq.${encodeURIComponent(type)}&select=*`
-    });
-    if(rows && rows[0]){
-      await sbFetch('interaction_counts',{
-        method:'PATCH',
-        query:`?id=eq.${rows[0].id}`,
-        headers:{Prefer:'return=minimal'},
-        body:{count:Number(rows[0].count||0)+1,nickname:who.nickname,updated_at:new Date().toISOString()}
-      });
-    }else{
-      await sbFetch('interaction_counts',{
-        method:'POST',
-        headers:{Prefer:'return=minimal'},
-        body:{account:who.account,nickname:who.nickname,interaction_type:type,count:1,updated_at:new Date().toISOString()}
-      });
-    }
-  }catch(e){
-    console.warn('upsertInteraction failed', type, e);
-  }
-  await refreshInteractionCounters();
-}
-/* Keep existing animations, but make the visible number come from DB after click */
-const v22OldKnockWood = knockWood;
-knockWood = async function(){
-  v22OldKnockWood();
-  await upsertInteraction('woodfish');
-};
-const v22OldMoveGrandma = moveGrandma;
-moveGrandma = async function(){
-  v22OldMoveGrandma();
-  await upsertInteraction('grandma');
-};
-refreshInteractionCounters();
-setInterval(refreshInteractionCounters, 20000);
-</script>
-
-
-<script>
-/* ===== v23 interaction persistence final patch ===== */
-function v23Who(){
-  const me = getCurrentUser && getCurrentUser();
-  return {
-    account: me ? me.account : 'guest_' + (localStorage.getItem('pgai_guest_id') || (()=>{const id='g'+Math.random().toString(36).slice(2,10); localStorage.setItem('pgai_guest_id',id); return id;})()),
-    nickname: me ? me.nickname : '訪客'
-  };
-}
-function v23GroupRows(rows){
-  const map = {};
+function v24Group(rows){
+  const map={};
   rows.forEach(r=>{
-    const name = r.nickname || r.account || '匿名';
-    if(!map[name]) map[name] = 0;
-    map[name] += Number(r.count || 0);
+    const key=r.nickname || r.account || '匿名';
+    map[key]=(map[key]||0)+Number(r.count||0);
   });
   return Object.entries(map).map(([nickname,count])=>({nickname,count})).sort((a,b)=>b.count-a.count);
 }
-async function v23FetchRows(type){
-  try{
-    return await sbFetch('interaction_counts',{
-      query:`?interaction_type=eq.${encodeURIComponent(type)}&select=nickname,account,count,updated_at&limit=1000`
-    });
-  }catch(e){
-    console.warn('v23 fetch interaction failed', type, e);
-    return [];
-  }
-}
-function v23RenderRank(targetId, grouped, unit){
-  const box = document.getElementById(targetId);
+function v24RenderRank(targetId, grouped, unit){
+  const box=document.getElementById(targetId);
   if(!box) return;
-  const top = grouped.slice(0,5);
+  const top=grouped.slice(0,5);
   if(!top.length){
-    box.innerHTML = `<div class="synced-rank-line"><div class="rank-no">1.</div><div class="rank-name">目前尚無排行</div><div class="rank-score">0 ${unit}</div></div>`;
+    box.innerHTML=`<div class="synced-rank-line"><div class="rank-no">1.</div><div class="rank-name">目前尚無排行</div><div class="rank-score">0 ${unit}</div></div>`;
     return;
   }
-  box.innerHTML = top.map((r,idx)=>`
-    <div class="synced-rank-line">
-      <div class="rank-no">${idx+1}.</div>
-      <div class="rank-name">${r.nickname}</div>
-      <div class="rank-score">${r.count} ${unit}</div>
-    </div>
-  `).join('');
+  box.innerHTML=top.map((r,i)=>`<div class="synced-rank-line"><div class="rank-no">${i+1}.</div><div class="rank-name">${r.nickname}</div><div class="rank-score">${r.count} ${unit}</div></div>`).join('');
 }
-async function v23RefreshInteractions(){
+async function v24RefreshInteractions(){
   if(!sbReady()) return;
-  const woodGrouped = v23GroupRows(await v23FetchRows('woodfish'));
-  const grandmaGrouped = v23GroupRows(await v23FetchRows('grandma'));
-  const woodTotal = woodGrouped.reduce((s,r)=>s+r.count,0);
-  const grandmaTotal = grandmaGrouped.reduce((s,r)=>s+r.count,0);
-  if($('woodCount')) $('woodCount').textContent = String(woodTotal);
-  if($('grandmaCount')) $('grandmaCount').textContent = String(grandmaTotal);
-  v23RenderRank('woodRankList', woodGrouped, '下');
-  v23RenderRank('grandmaRankList', grandmaGrouped, '次');
+  const wood=v24Group(await v24Rows('woodfish'));
+  const grandma=v24Group(await v24Rows('grandma'));
+  const woodTotal=wood.reduce((s,r)=>s+r.count,0);
+  const grandmaTotal=grandma.reduce((s,r)=>s+r.count,0);
+  if($('woodCount')) $('woodCount').textContent=String(woodTotal);
+  if($('grandmaCount')) $('grandmaCount').textContent=String(grandmaTotal);
+  v24RenderRank('woodRankList',wood,'下');
+  v24RenderRank('grandmaRankList',grandma,'次');
 }
-async function v23InsertInteraction(type){
-  const who = v23Who();
+async function v24AddInteraction(typeName){
+  const who=v24Who();
   try{
     await sbFetch('interaction_counts',{
       method:'POST',
@@ -1175,49 +1076,51 @@ async function v23InsertInteraction(type){
       body:{
         account:who.account,
         nickname:who.nickname,
-        interaction_type:type,
+        type:typeName,
+        interaction_type:typeName,
         count:1,
         updated_at:new Date().toISOString()
       }
     });
   }catch(e){
-    console.warn('v23 insert interaction failed', type, e);
+    console.warn('v24AddInteraction failed', typeName, e);
+    alert('互動次數寫入失敗：' + e.message);
   }
-  await v23RefreshInteractions();
+  await v24RefreshInteractions();
 }
 
-/* Override click handlers from earlier versions. Keep animations, but persist by insert + sum. */
+/* Replace earlier click handlers entirely. */
 knockWood = async function(){
   const f=$('woodFloat');
   if(f){ f.classList.remove('play'); void f.offsetWidth; f.classList.add('play'); }
-  await v23InsertInteraction('woodfish');
+  await v24AddInteraction('woodfish');
 };
 
 moveGrandma = async function(){
-  const g=$('grandma'), btn=$('grandmaBtn'), c=$('grandmaCount'), msg=$('grandmaMsg'), bubble=$('grandmaBubble');
-  if(window.pgGrandmaMovingV23) return;
-  window.pgGrandmaMovingV23 = true;
+  const g=$('grandma'), btn=$('grandmaBtn'), msg=$('grandmaMsg'), bubble=$('grandmaBubble');
+  if(window.pgGrandmaMovingV24) return;
+  window.pgGrandmaMovingV24=true;
   btn.disabled=true;
   btn.classList.add('opacity-70','cursor-not-allowed');
-  window.pgGrandmaRightV23 = !window.pgGrandmaRightV23;
-  g.classList.toggle('right',window.pgGrandmaRightV23);
+  window.pgGrandmaRightV24=!window.pgGrandmaRightV24;
+  g.classList.toggle('right',window.pgGrandmaRightV24);
   bubble.classList.remove('hidden');
-  bubble.classList.toggle('right',window.pgGrandmaRightV23);
+  bubble.classList.toggle('right',window.pgGrandmaRightV24);
   const words=Math.random()>.5?'祝你開轟':'謝謝好心人';
   bubble.textContent=words;
   msg.textContent=words;
-  btn.textContent=window.pgGrandmaRightV23?'扶她回來':'扶阿嬤過馬路';
-  await v23InsertInteraction('grandma');
+  btn.textContent=window.pgGrandmaRightV24?'扶她回來':'扶阿嬤過馬路';
+  await v24AddInteraction('grandma');
   setTimeout(()=>{
-    window.pgGrandmaMovingV23=false;
+    window.pgGrandmaMovingV24=false;
     btn.disabled=false;
     btn.classList.remove('opacity-70','cursor-not-allowed');
     setTimeout(()=>bubble.classList.add('hidden'),900);
   },800);
 };
 
-v23RefreshInteractions();
-setInterval(v23RefreshInteractions, 15000);
+v24RefreshInteractions();
+setInterval(v24RefreshInteractions,15000);
 </script>
 
 </body>
