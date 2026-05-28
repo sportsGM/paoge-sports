@@ -1,4 +1,1 @@
-v44 online zero then real
-- Top online badges start at 0.
-- Old v30/v35 startup refreshes are disabled.
-- Final numbers render only after online_base_settings and real online users are both computed.
+v51 - homepage CSS-first no AI recommendation flash + World Cup info fixed
