@@ -139,6 +139,11 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
 .simple-rank .synced-rank-line .rank-name{color:#e5e7eb;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .simple-rank .synced-rank-line .rank-score{color:#34d399;font-weight:950;white-space:nowrap}
 
+
+.pred-cancel-btn{border:1px solid rgba(248,113,113,.35);background:rgba(248,113,113,.10);color:#fca5a5;border-radius:12px;padding:8px 10px;font-size:.78rem;font-weight:950}
+.pred-cancel-btn:hover{background:rgba(248,113,113,.18)}
+.pred-note.saved{color:#86efac}
+
 </style>
 <script src="./config.js"></script>
 </head>
@@ -210,10 +215,10 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
             <option value="day">本日</option><option value="week">本周</option><option value="month">本月</option>
           </select>
         </div>
-        <div id="rankPodium" class="rank-podium mb-3"></div>
+        <div id="rankPodium" class="rank-podium mb-3"><div class="text-sm text-slate-500 font-black p-3">預測排行榜載入中...</div></div>
         <div class="border-t border-dashed border-slate-700 pt-3">
           <div class="text-xs text-slate-500 font-black mb-2">4 - 10 名</div>
-          <div id="rankList" class="space-y-2 text-sm"></div>
+          <div id="rankList" class="space-y-2 text-sm"><div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">載入中</div></div>
         </div>
       </section>
 
@@ -359,13 +364,8 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
     <div class="modal-rank-wrap">
       <section class="compact-rank-card">
         <div class="honor-head"><div><div class="honor-title">🏆 體育預測</div><div class="honor-sub">站內準度排行</div></div><span class="honor-badge">TOP 6</span></div>
-        <div class="simple-rank">
-          <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">水過仙人</div><div class="rank-score">78%</div></div>
-          <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">林口兄弟</div><div class="rank-score">74%</div></div>
-          <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">盤口小王</div><div class="rank-score">71%</div></div>
-          <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">北區老司機</div><div class="rank-score">69%</div></div>
-          <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">VIP小豪</div><div class="rank-score">68%</div></div>
-          <div class="rank-line"><div class="rank-no">6.</div><div class="rank-name">反路阿辰</div><div class="rank-score">66%</div></div>
+        <div id="modalSportsRankList" class="simple-rank">
+          <div class="synced-rank-line"><div class="rank-no">...</div><div class="rank-name">排行榜載入中</div><div class="rank-score">--%</div></div>
         </div>
       </section>
       <section class="compact-rank-card">
@@ -1121,6 +1121,175 @@ moveGrandma = async function(){
 
 v24RefreshInteractions();
 setInterval(v24RefreshInteractions,15000);
+</script>
+
+
+<script>
+/* ===== v26 rank overview sync ===== */
+async function v26RefreshRankOverview(){
+  if(!sbReady()) return;
+  try{
+    const woodRows = typeof v24Rows === 'function' ? await v24Rows('woodfish') : [];
+    const grandmaRows = typeof v24Rows === 'function' ? await v24Rows('grandma') : [];
+    const woodGrouped = typeof v24Group === 'function' ? v24Group(woodRows) : [];
+    const grandmaGrouped = typeof v24Group === 'function' ? v24Group(grandmaRows) : [];
+    if(typeof v24RenderRank === 'function'){
+      v24RenderRank('modalWoodRankList', woodGrouped, '下');
+      v24RenderRank('modalGrandmaRankList', grandmaGrouped, '次');
+    }
+  }catch(e){
+    console.warn('v26 rank overview failed', e);
+  }
+}
+const v26OldOpenAllRanks = openAllRanks;
+openAllRanks = function(){
+  v26OldOpenAllRanks();
+  v26RefreshRankOverview();
+};
+setTimeout(v26RefreshRankOverview, 800);
+</script>
+
+
+<script>
+/* ===== v27 prediction rank sync + cancel prediction ===== */
+async function v27FetchSportsUsers(){
+  try{
+    const rows = await sbFetch('app_users',{
+      query:'?select=nickname,account,role,month_recommended,month_wins'
+    });
+    return (rows||[]).map(u=>{
+      const rec=Number(u.month_recommended||0);
+      const wins=Number(u.month_wins||0);
+      const rate=rec?Math.round(wins/rec*100):0;
+      return {name:u.nickname||u.account||'匿名',account:u.account,role:u.role||'體育萌新',rec,wins,rate};
+    }).filter(u=>u.rec>0).sort((a,b)=>b.rate-a.rate || b.wins-a.wins || b.rec-a.rec);
+  }catch(e){
+    console.warn('v27FetchSportsUsers failed',e);
+    return [];
+  }
+}
+function v27RankLineHTML(rows, unit='%'){
+  if(!rows.length){
+    return `<div class="synced-rank-line"><div class="rank-no">1.</div><div class="rank-name">目前尚無排行</div><div class="rank-score">--${unit}</div></div>`;
+  }
+  return rows.slice(0,6).map((r,idx)=>`
+    <div class="synced-rank-line">
+      <div class="rank-no">${idx+1}.</div>
+      <div class="rank-name">${r.name}</div>
+      <div class="rank-score">${r.rate}${unit}</div>
+    </div>
+  `).join('');
+}
+function v27SidePodiumHTML(rows){
+  if(!rows.length){
+    return `<div class="text-sm text-slate-500 font-black p-3">目前尚無預測排行</div>`;
+  }
+  const padded=[...rows];
+  while(padded.length<3) padded.push({name:'待上榜',rate:'--',wins:0,rec:0});
+  const order=[{r:padded[1],n:2,cls:'podium-2'},{r:padded[0],n:1,cls:'podium-1'},{r:padded[2],n:3,cls:'podium-3'}];
+  return order.map(o=>`<div class="podium-col ${o.cls}"><div class="text-3xl font-black ${o.n===1?'text-yellow-300':o.n===2?'text-slate-200':'text-orange-300'}">${o.n}</div><button class="font-black mt-2 click-name" onclick="openRankDetail({name:'${String(o.r.name).replace(/'/g,'&#39;')}',prob:${Number(o.r.rate)||0},picks:['本月 ${o.r.wins||0} 中 / ${o.r.rec||0} 場'],comments:['由會員本月預測資料統計']})">${o.r.name}</button><div class="text-emerald-300 font-black mt-1">${o.r.rate}%</div></div>`).join('');
+}
+async function v27RefreshSportsRank(){
+  const rows=await v27FetchSportsUsers();
+  if($('rankPodium')) $('rankPodium').innerHTML=v27SidePodiumHTML(rows);
+  if($('rankList')){
+    const rest=rows.slice(3,10);
+    $('rankList').innerHTML=rest.length?rest.map((r,idx)=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="flex justify-between items-center gap-3"><button onclick="openRankDetail({name:'${String(r.name).replace(/'/g,'&#39;')}',prob:${Number(r.rate)||0},picks:['本月 ${r.wins} 中 / ${r.rec} 場'],comments:['由會員本月預測資料統計']})" class="font-black text-left click-name">${idx+4}. ${r.name}</button><span class="text-emerald-300 font-black">${r.rate}%</span></div></div>`).join(''):`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">尚無第 4 名之後排行</div>`;
+  }
+  if($('modalSportsRankList')) $('modalSportsRankList').innerHTML=v27RankLineHTML(rows,'%');
+}
+renderRank = function(){
+  if($('rankPodium')) $('rankPodium').innerHTML=`<div class="text-sm text-slate-500 font-black p-3">預測排行榜載入中...</div>`;
+  if($('rankList')) $('rankList').innerHTML=`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">載入中</div>`;
+  v27RefreshSportsRank();
+};
+const v27OldOpenAllRanks = openAllRanks;
+openAllRanks = function(){
+  v27OldOpenAllRanks();
+  v27RefreshSportsRank();
+  if(typeof v26RefreshRankOverview==='function') v26RefreshRankOverview();
+};
+async function v27LoadDbPredictions(){
+  const me=getCurrentUser && getCurrentUser();
+  if(!me || !sbReady()) return;
+  try{
+    const rows=await sbFetch('predictions',{
+      query:`?account=eq.${encodeURIComponent(me.account)}&select=game_key,market_type,pick,result,created_at&order=created_at.desc&limit=500`
+    });
+    const p={};
+    (rows||[]).forEach(r=>{
+      if(!p[r.game_key]){
+        p[r.game_key]={choice:r.pick,market:r.market_type,at:r.created_at,status:r.result||'pending'};
+      }
+    });
+    savePreds(p);
+  }catch(e){
+    console.warn('v27LoadDbPredictions failed',e);
+  }
+}
+openPredictionCenter = async function(){
+  await v27LoadDbPredictions();
+  renderPredictionCenter();
+  $('predictionModal').classList.remove('hidden');
+};
+cancelPrediction = async function(key,market){
+  const me=getCurrentUser && getCurrentUser();
+  const p=loadPreds();
+  delete p[key];
+  savePreds(p);
+  if(me && sbReady()){
+    try{
+      await sbFetch('predictions',{
+        method:'DELETE',
+        query:`?account=eq.${encodeURIComponent(me.account)}&game_key=eq.${encodeURIComponent(key)}&market_type=eq.${encodeURIComponent(market||'')}`,
+        headers:{Prefer:'return=minimal'}
+      });
+    }catch(e){
+      console.warn('cancelPrediction DB failed',e);
+    }
+  }
+  renderPredictionCenter();
+};
+savePrediction = async function(key,choice,market){
+  const me=getCurrentUser && getCurrentUser();
+  if(!me){ alert('請先登入後再預測'); openAuthModal('login'); return; }
+  const p=loadPreds();
+  p[key]={choice,market,at:new Date().toLocaleString('zh-TW'),status:'待結算'};
+  savePreds(p);
+  if(sbReady()){
+    try{
+      await sbFetch('predictions',{
+        method:'DELETE',
+        query:`?account=eq.${encodeURIComponent(me.account)}&game_key=eq.${encodeURIComponent(key)}&market_type=eq.${encodeURIComponent(market||'')}`,
+        headers:{Prefer:'return=minimal'}
+      });
+      await sbFetch('predictions',{method:'POST',headers:{Prefer:'return=minimal'},body:{
+        game_key:key,
+        account:me.account,
+        nickname:me.nickname,
+        market_type:market||'total',
+        pick:choice,
+        line_text:choice,
+        result:'pending',
+        created_at:new Date().toISOString()
+      }});
+    }catch(e){
+      console.warn('prediction DB save failed',e);
+    }
+  }
+  renderPredictionCenter();
+};
+predBtn = function(key,choice,market,saved){
+  const safe=String(choice).replace(/'/g,"&#39;");
+  const active=saved&&saved.choice===choice;
+  return `<button class="pred-btn ${active?'active':''}" onclick="savePrediction('${key}','${safe}','${market}')">${choice}</button>`;
+};
+renderMarketBlock = function(g,market,title,line,choices){
+  const key=predKey(g,market);
+  const saved=loadPreds()[key];
+  return `<div class="pred-market"><div class="pred-market-head"><div class="pred-market-title">${title}</div><div class="pred-market-line">${line}</div></div><div class="pred-save-row">${choices.map(c=>predBtn(key,c,market,saved)).join('')}${saved?`<button class="pred-cancel-btn" onclick="cancelPrediction('${key}','${market}')">取消預測</button>`:''}</div><div class="pred-note ${saved?'saved':''}">${saved?`已選：${saved.choice}｜${saved.status||'待結算'}`:'尚未預測'}</div></div>`;
+};
+v27RefreshSportsRank();
 </script>
 
 </body>
