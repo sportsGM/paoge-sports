@@ -210,6 +210,28 @@ img{
   color:#cbd5e1;
 }
 
+
+.comment-empty{border:1px dashed rgba(148,163,184,.22);background:#020617;border-radius:16px;padding:16px;color:#94a3b8;font-weight:900;text-align:center}
+.hot-pick-empty{border:1px dashed rgba(148,163,184,.22);background:#020617;border-radius:16px;padding:14px;color:#94a3b8;font-weight:900;font-size:.88rem}
+.acc-pill{border:1px solid rgba(52,211,153,.24);background:rgba(52,211,153,.10);color:#86efac;border-radius:999px;padding:5px 9px;font-size:.72rem;font-weight:950;white-space:nowrap}
+.vip-only-note{font-size:.74rem;color:#fbbf24;font-weight:900;margin-top:6px}
+
+
+.day-switch{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.day-btn{border:1px solid rgba(148,163,184,.18);background:#020617;color:#cbd5e1;border-radius:999px;padding:8px 12px;font-size:.82rem;font-weight:950}
+.day-btn.active{background:linear-gradient(90deg,#facc15,#34d399);color:#020617;border-color:transparent}
+.hot-modal-grid{display:grid;gap:10px}
+.hot-market-group{border:1px solid rgba(148,163,184,.14);background:#020617;border-radius:18px;padding:14px}
+.hot-market-title{font-weight:950;color:#fbbf24;margin-bottom:10px}
+.hot-options{display:flex;gap:8px;flex-wrap:wrap}
+.hot-option{border:1px solid rgba(148,163,184,.18);background:#0f172a;color:#e5e7eb;border-radius:999px;padding:9px 12px;font-size:.86rem;font-weight:950}
+.hot-option.active{background:linear-gradient(90deg,#facc15,#34d399);color:#020617;border-color:transparent}
+.hot-textarea{width:100%;min-height:96px;border:1px solid rgba(148,163,184,.18);background:#020617;color:#e5e7eb;border-radius:16px;padding:12px;outline:none;resize:vertical;font-weight:800}
+.hot-textarea:focus{border-color:rgba(52,211,153,.45)}
+.hot-modal-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.hot-submit{border:0;background:linear-gradient(90deg,#facc15,#34d399);color:#020617;border-radius:14px;padding:11px 16px;font-weight:950}
+.hot-cancel{border:1px solid rgba(148,163,184,.18);background:#0f172a;color:#e5e7eb;border-radius:14px;padding:11px 16px;font-weight:950}
+
 </style>
 <script src="./config.js"></script>
 </head>
@@ -265,7 +287,7 @@ img{
         <div class="flex items-center justify-between gap-3 mb-4">
           <div>
             <h2 id="leagueTitle" class="text-lg font-black">MLB｜今日賽事</h2>
-            <p class="text-xs text-slate-500">★ 大眾普遍參考方向，正式版依當日資料自動更新。</p>
+            <p class="text-xs text-slate-500">★ 大眾普遍參考方向，正式版依當日資料自動更新。</p><div id="daySwitch" class="day-switch"></div>
           </div>
           <div class="text-xs text-emerald-300 font-black">資料同步中</div>
         </div>
@@ -1651,6 +1673,484 @@ setInterval(v30RefreshTopOnline, 10*60*1000);
     Object.defineProperty(window, '__SPORTS_GM_PROTECTED__', {value:true, writable:false});
   }catch(e){}
 })();
+</script>
+
+
+<script>
+/* ===== v32: real per-game comments + VIP hot picks from comments ===== */
+function v32Today(){
+  const d=new Date();
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function v32Accuracy(user){
+  if(!user) return '--';
+  const rec=Number(user.month_recommended||0);
+  const wins=Number(user.month_wins||0);
+  return rec?Math.round(wins/rec*100):'--';
+}
+async function v32UsersMap(){
+  try{
+    const rows=await sbFetch('app_users',{query:'?select=account,nickname,role,month_recommended,month_wins'});
+    const map={};
+    (rows||[]).forEach(u=>{ map[u.account]=u; });
+    return map;
+  }catch(e){
+    console.warn('v32 users map failed',e);
+    return {};
+  }
+}
+function v32CurrentGame(){
+  const list=games[state.league]||games.MLB;
+  return list[currentGameIndex]||list[0];
+}
+function v32CurrentGameKey(){
+  const g=v32CurrentGame();
+  return `${state.league}_${currentGameIndex}_${g.away}_${g.home}`;
+}
+function v32MarketChoices(){
+  const g=v32CurrentGame();
+  const money=(g.money||'獨贏').replace('★','').trim();
+  const spread=(g.spread||'讓分盤').replace('★','').trim();
+  const total=(g.total||'大小分').replace('★','').trim();
+  return [
+    `獨贏｜${money}`,
+    `讓分｜${spread}`,
+    `大小分｜${total}`
+  ];
+}
+async function v32FetchComments(type){
+  try{
+    return await sbFetch('comments',{
+      query:`?game_key=eq.${encodeURIComponent(v32CurrentGameKey())}&comment_type=eq.${encodeURIComponent(type)}&match_date=eq.${v32Today()}&select=*&order=created_at.desc&limit=50`
+    });
+  }catch(e){
+    console.warn('v32 fetch comments failed', type, e);
+    return [];
+  }
+}
+async function v32LoadPunditComments(){
+  const box=$('dbPunditComments');
+  if(!box) return;
+  const [rows,userMap]=await Promise.all([v32FetchComments('pundit'),v32UsersMap()]);
+  let enriched=(rows||[]).map(r=>{
+    const u=userMap[r.account]||{};
+    return {...r,acc:v32Accuracy(u),role:u.role||''};
+  });
+  enriched.sort((a,b)=>{
+    if(punditSort==='accuracy') return (Number(b.acc)||0)-(Number(a.acc)||0);
+    return new Date(b.created_at)-new Date(a.created_at);
+  });
+  if(!enriched.length){
+    box.innerHTML='<div class="comment-empty">目前還沒有VIP好手熱推，等VIP會員留言後才會出現。</div>';
+    return;
+  }
+  box.innerHTML=enriched.map((r,idx)=>`<article class="comment-card"><div class="top"><div class="name">🔥 ${r.nickname||'匿名'}</div><div class="acc-pill">準確率 ${r.acc}%</div></div><div class="pick">${r.market_pick||'未選盤口'}</div><div class="body">${r.content||''}</div><div class="time">留言時間｜${new Date(r.created_at).toLocaleString('zh-TW')}　排序第 ${idx+1}</div></article>`).join('');
+}
+async function v32LoadPlayerComments(){
+  const box=$('dbPlayerComments');
+  if(!box) return;
+  const rows=await v32FetchComments('player');
+  if(!rows.length){
+    box.innerHTML='<div class="comment-empty">目前還沒有玩家留言，有人留言後才會出現。</div>';
+    return;
+  }
+  box.innerHTML=rows.map(r=>`<article class="comment-card"><div class="top"><div class="name">${r.nickname||'匿名'}</div><div class="tag">玩家留言</div></div><div class="body">${r.content||''}</div><div class="time">留言時間｜${new Date(r.created_at).toLocaleString('zh-TW')}</div></article>`).join('');
+}
+pundits=function(g){
+  setTimeout(v32LoadPunditComments,120);
+  return `<div class="board-head"><div><div class="board-title">各路好手留言板</div><div class="vip-only-note">VIP會員 / 體育大神可發佈今日熱推盤口</div></div><button class="board-btn" onclick="openCommentComposer('各路好手留言板')">我要留言</button></div><div class="sort-tools"><button class="sort-btn ${punditSort==='time'?'active':''}" onclick="punditSort='time';openGame(currentGameIndex,'board')">時間排序</button><button class="sort-btn ${punditSort==='accuracy'?'active':''}" onclick="punditSort='accuracy';openGame(currentGameIndex,'board')">準確率排序</button></div><div id="dbPunditComments" class="comment-list"><div class="comment-empty">好手留言載入中...</div></div><div class="board-pager"><button class="board-page-btn active">第 1 頁</button><button class="board-page-btn" onclick="alert('正式版會讀取第二頁資料')">第 2 頁</button></div>`;
+};
+playerComments=function(){
+  setTimeout(v32LoadPlayerComments,120);
+  return `<div class="board-head"><div class="board-title">玩家留言板</div><button class="board-btn" onclick="openCommentComposer('玩家留言板')">我要留言</button></div><div id="dbPlayerComments" class="comment-list"><div class="comment-empty">玩家留言載入中...</div></div><div class="board-pager"><button class="board-page-btn active">第 1 頁</button><button class="board-page-btn" onclick="alert('正式版會讀取第二頁資料')">第 2 頁</button></div>`;
+};
+openCommentComposer=async function(board){
+  const me=getCurrentUser&&getCurrentUser();
+  if(!me){ alert('請先登入後再留言'); openAuthModal('login'); return; }
+
+  const isPundit=board.includes('好手');
+  let marketPick='';
+
+  if(isPundit){
+    if(!(me.role==='VIP會員'||me.role==='體育大神')){
+      alert('只有VIP會員或體育大神可以在各路好手留言板發佈熱推。');
+      return;
+    }
+    const choices=v32MarketChoices();
+    const msg=`請選今天熱推盤口：\n1. ${choices[0]}\n2. ${choices[1]}\n3. ${choices[2]}\n\n請輸入 1、2 或 3`;
+    const ans=prompt(msg,'1');
+    if(!ans) return;
+    const idx=Number(ans.trim())-1;
+    if(idx<0||idx>2||!choices[idx]){
+      alert('請輸入 1、2 或 3');
+      return;
+    }
+    marketPick=choices[idx];
+  }
+
+  const text=prompt(isPundit?'請輸入熱推留言，至少 5 個字':'請輸入留言，至少 5 個字');
+  if(!text) return;
+  if(text.trim().length<5){ alert('留言至少 5 個字'); return; }
+
+  try{
+    await sbFetch('comments',{method:'POST',headers:{Prefer:'return=minimal'},body:{
+      game_key:v32CurrentGameKey(),
+      account:me.account,
+      nickname:me.nickname,
+      content:text.trim(),
+      market_pick:marketPick,
+      comment_type:isPundit?'pundit':'player',
+      match_date:v32Today(),
+      created_at:new Date().toISOString()
+    }});
+    alert('留言成功');
+    if(isPundit){
+      v32LoadPunditComments();
+      v32RenderHotPicks();
+    }else{
+      v32LoadPlayerComments();
+    }
+  }catch(e){
+    alert('留言失敗：'+e.message);
+  }
+};
+
+/* Homepage hot picks now comes from VIP pundit comments, not from hot_picks/static frontend */
+async function v32RenderHotPicks(){
+  if(!$('hotPicks')) return;
+  try{
+    const rows=await sbFetch('comments',{
+      query:`?comment_type=eq.pundit&match_date=eq.${v32Today()}&select=*&order=created_at.desc&limit=8`
+    });
+    if(!rows||!rows.length){
+      $('hotPicks').innerHTML='<div class="hot-pick-empty">今日尚無VIP好手熱推，VIP到各路好手留言板留言後會自動出現。</div>';
+      return;
+    }
+    const userMap=await v32UsersMap();
+    $('hotPicks').innerHTML=rows.map(r=>{
+      const u=userMap[r.account]||{};
+      const acc=v32Accuracy(u);
+      return `<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="flex justify-between gap-2"><b class="text-amber-300">🔥 ${r.nickname||'匿名'}</b><span class="text-emerald-300 font-black">${acc}%</span></div><div class="text-blue-300 font-black mt-1">${r.market_pick||'未選盤口'}</div><div class="text-xs text-slate-500 font-black mt-2">${r.content||''}</div></div>`;
+    }).join('');
+  }catch(e){
+    console.warn('v32RenderHotPicks failed',e);
+    $('hotPicks').innerHTML='<div class="hot-pick-empty">好手熱推讀取失敗，請確認 comments 欄位與權限。</div>';
+  }
+}
+renderHotPicks=function(){
+  if($('hotPicks')) $('hotPicks').innerHTML='<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">熱推載入中...</div>';
+  v32RenderHotPicks();
+};
+v32RenderHotPicks();
+</script>
+
+
+<div id="hotPickModal" class="hidden fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm p-4 flex items-center justify-center">
+  <div class="card rounded-3xl p-5 max-w-xl w-full max-h-[92vh] overflow-y-auto">
+    <div class="flex justify-between items-center mb-4">
+      <div>
+        <h3 class="text-xl font-black text-amber-300">發佈今日熱推</h3>
+        <p id="hotPickGameTitle" class="text-xs text-slate-500 font-black mt-1">選擇盤口方向並輸入留言</p>
+      </div>
+      <button onclick="closeHotPickModal()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
+    </div>
+    <div class="hot-modal-grid">
+      <div class="hot-market-group">
+        <div class="hot-market-title">選擇熱推盤口</div>
+        <div id="hotPickOptions" class="hot-options"></div>
+      </div>
+      <div>
+        <div class="hot-market-title">留言內容</div>
+        <textarea id="hotPickText" class="hot-textarea" placeholder="請輸入至少 5 個字，例如：今天盤口偏穩，大小分可觀察。"></textarea>
+      </div>
+      <div id="hotPickModalMsg" class="text-sm font-black text-pink-300 hidden"></div>
+      <div class="hot-modal-actions">
+        <button class="hot-cancel" onclick="closeHotPickModal()">取消</button>
+        <button class="hot-submit" onclick="submitHotPickModal()">送出熱推</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<script>
+/* ===== v33: custom VIP hot-pick modal + today/yesterday game mode ===== */
+let v33DayMode = localStorage.getItem('pgai_day_mode') || 'today';
+let v33HotPickSelected = '';
+function v33DateByMode(mode){
+  const d=new Date();
+  if(mode==='yesterday') d.setDate(d.getDate()-1);
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function v32Today(){ return v33DateByMode(v33DayMode); }
+function v33ModeLabel(){ return v33DayMode==='yesterday'?'昨日賽事':'今日賽事'; }
+function v33RenderDaySwitch(){
+  const box=$('daySwitch');
+  if(!box) return;
+  box.innerHTML=`<button class="day-btn ${v33DayMode==='today'?'active':''}" onclick="setGameDayMode('today')">今日賽事</button><button class="day-btn ${v33DayMode==='yesterday'?'active':''}" onclick="setGameDayMode('yesterday')">昨日賽事</button>`;
+}
+function setGameDayMode(mode){
+  v33DayMode=mode;
+  localStorage.setItem('pgai_day_mode',mode);
+  renderLeagues();
+  renderGames();
+  renderHotPicks();
+}
+const v33OldRenderGames = renderGames;
+renderGames = function(){
+  v33OldRenderGames();
+  v33RenderDaySwitch();
+  const title=$('leagueTitle');
+  if(title && !title.textContent.includes(v33ModeLabel())){
+    title.textContent = title.textContent.replace('今日賽事',v33ModeLabel());
+  }
+};
+
+/* Keep game lists separate by date in DB key; yesterday can show same demo match list but isolated data */
+function v32CurrentGameKey(){
+  const list=games[state.league]||games.MLB;
+  const g=list[currentGameIndex]||list[0];
+  return `${v33DateByMode(v33DayMode)}_${state.league}_${currentGameIndex}_${g.away}_${g.home}`;
+}
+
+/* Better market choices for VIP hot picks */
+function v33Choices(){
+  const g=v32CurrentGame ? v32CurrentGame() : (games[state.league]||games.MLB)[currentGameIndex];
+  const money=(g.money||'獨贏').replace('★','').trim();
+  const spread=(g.spread||'讓分盤').replace('★','').trim();
+  const total=(g.total||'大小分').replace('★','').trim();
+  const teams=[g.away,g.home];
+  return [
+    {label:`獨贏｜${teams[0]}`, value:`獨贏｜${teams[0]}`},
+    {label:`獨贏｜${teams[1]}`, value:`獨贏｜${teams[1]}`},
+    {label:`讓分｜${spread}`, value:`讓分｜${spread}`},
+    {label:`受讓｜對面受讓`, value:`受讓｜對面受讓`},
+    {label:`大分｜${total}`, value:`大分｜${total}`},
+    {label:`小分｜${total}`, value:`小分｜${total}`}
+  ];
+}
+function openHotPickModal(){
+  const me=getCurrentUser&&getCurrentUser();
+  if(!me){ alert('請先登入後再留言'); openAuthModal('login'); return; }
+  if(!(me.role==='VIP會員'||me.role==='體育大神')){
+    alert('只有VIP會員或體育大神可以在各路好手留言板發佈熱推。');
+    return;
+  }
+  const g=v32CurrentGame ? v32CurrentGame() : (games[state.league]||games.MLB)[currentGameIndex];
+  v33HotPickSelected='';
+  $('hotPickGameTitle').textContent=`${v33ModeLabel()}｜${g.away} vs ${g.home}`;
+  $('hotPickText').value='';
+  $('hotPickModalMsg').classList.add('hidden');
+  $('hotPickOptions').innerHTML=v33Choices().map((c,idx)=>`<button class="hot-option" data-v="${c.value.replace(/"/g,'&quot;')}" onclick="selectHotPickOption(${idx})">${c.label}</button>`).join('');
+  $('hotPickModal').classList.remove('hidden');
+}
+function selectHotPickOption(idx){
+  const buttons=[...document.querySelectorAll('#hotPickOptions .hot-option')];
+  buttons.forEach(b=>b.classList.remove('active'));
+  const btn=buttons[idx];
+  if(btn){
+    btn.classList.add('active');
+    v33HotPickSelected=btn.dataset.v;
+  }
+}
+function closeHotPickModal(){ $('hotPickModal').classList.add('hidden'); }
+async function submitHotPickModal(){
+  const me=getCurrentUser&&getCurrentUser();
+  const msg=$('hotPickModalMsg');
+  const text=$('hotPickText').value.trim();
+  if(!v33HotPickSelected){
+    msg.textContent='請先選擇一個熱推盤口';
+    msg.classList.remove('hidden');
+    return;
+  }
+  if(text.length<5){
+    msg.textContent='留言至少 5 個字';
+    msg.classList.remove('hidden');
+    return;
+  }
+  try{
+    await sbFetch('comments',{method:'POST',headers:{Prefer:'return=minimal'},body:{
+      game_key:v32CurrentGameKey(),
+      account:me.account,
+      nickname:me.nickname,
+      content:text,
+      market_pick:v33HotPickSelected,
+      comment_type:'pundit',
+      match_date:v33DateByMode(v33DayMode),
+      created_at:new Date().toISOString()
+    }});
+    closeHotPickModal();
+    alert('熱推已送出');
+    v32LoadPunditComments();
+    v32RenderHotPicks();
+  }catch(e){
+    msg.textContent='送出失敗：'+e.message;
+    msg.classList.remove('hidden');
+  }
+}
+
+/* Override board composer: player uses web prompt only for now; VIP hotpick uses custom modal */
+openCommentComposer=async function(board){
+  const me=getCurrentUser&&getCurrentUser();
+  if(!me){ alert('請先登入後再留言'); openAuthModal('login'); return; }
+  const isPundit=board.includes('好手');
+  if(isPundit){
+    openHotPickModal();
+    return;
+  }
+  const text=prompt('請輸入留言，至少 5 個字');
+  if(!text) return;
+  if(text.trim().length<5){ alert('留言至少 5 個字'); return; }
+  try{
+    await sbFetch('comments',{method:'POST',headers:{Prefer:'return=minimal'},body:{
+      game_key:v32CurrentGameKey(),
+      account:me.account,
+      nickname:me.nickname,
+      content:text.trim(),
+      market_pick:'',
+      comment_type:'player',
+      match_date:v33DateByMode(v33DayMode),
+      created_at:new Date().toISOString()
+    }});
+    alert('留言成功');
+    v32LoadPlayerComments();
+  }catch(e){
+    alert('留言失敗：'+e.message);
+  }
+};
+
+renderGames();
+renderHotPicks();
+</script>
+
+
+<script>
+/* ===== v34: correct paired spread/total choices + homepage highest-accuracy hot pick per game ===== */
+function v34Signed(num){
+  const n=Number(num);
+  if(Number.isNaN(n)) return String(num);
+  return n>0?`+${Math.abs(n)}`:`-${Math.abs(n)}`;
+}
+function v34ExtractNumber(text){
+  const m=String(text||'').match(/([+-]?\d+(?:\.\d+)?)/);
+  return m?Number(m[1]):null;
+}
+function v34OppTeam(team,g){
+  return team===g.away ? g.home : g.away;
+}
+function v34SpreadPair(g){
+  const raw=String(g.spread||'').replace('★','').trim();
+  const n=v34ExtractNumber(raw);
+  let team='';
+  if(raw.includes(g.away)) team=g.away;
+  if(raw.includes(g.home)) team=g.home;
+  if(!team) team=g.home || g.away;
+  if(n===null){
+    return [
+      {label:`讓分｜${raw||'讓分盤'}`, value:`讓分｜${raw||'讓分盤'}`},
+      {label:`受讓｜對面受讓`, value:`受讓｜對面受讓`}
+    ];
+  }
+  const other=v34OppTeam(team,g);
+  const teamLine=`${team} ${v34Signed(n)}`;
+  const otherLine=`${other} ${v34Signed(-n)}`;
+  return [
+    {label:`讓分｜${teamLine}`, value:`讓分｜${teamLine}`},
+    {label:`受讓｜${otherLine}`, value:`受讓｜${otherLine}`}
+  ];
+}
+function v34TotalPair(g){
+  const raw=String(g.total||'').replace('★','').trim();
+  const n=v34ExtractNumber(raw);
+  const line=n===null?(raw||'大小分'):String(Math.abs(n));
+  return [
+    {label:`大分｜大 ${line}`, value:`大分｜大 ${line}`},
+    {label:`小分｜小 ${line}`, value:`小分｜小 ${line}`}
+  ];
+}
+function v33Choices(){
+  const g=v32CurrentGame ? v32CurrentGame() : (games[state.league]||games.MLB)[currentGameIndex];
+  return [
+    {label:`獨贏｜${g.away}`, value:`獨贏｜${g.away}`},
+    {label:`獨贏｜${g.home}`, value:`獨贏｜${g.home}`},
+    ...v34SpreadPair(g),
+    ...v34TotalPair(g)
+  ];
+}
+function v34AllGameKeyMap(dateStr){
+  const map={};
+  Object.keys(games).forEach(league=>{
+    (games[league]||[]).forEach((g,idx)=>{
+      const key=`${dateStr}_${league}_${idx}_${g.away}_${g.home}`;
+      map[key]={...g,league,idx,key};
+    });
+  });
+  return map;
+}
+function v34AccuracyFromUser(u){
+  if(!u) return -1;
+  const rec=Number(u.month_recommended||0);
+  const wins=Number(u.month_wins||0);
+  return rec?Math.round(wins/rec*100):0;
+}
+/* Homepage hot picks: one highest-accuracy pundit comment per game */
+async function v32RenderHotPicks(){
+  if(!$('hotPicks')) return;
+  const dateStr=v33DateByMode ? v33DateByMode('today') : (new Date()).toISOString().slice(0,10);
+  try{
+    const rows=await sbFetch('comments',{
+      query:`?comment_type=eq.pundit&match_date=eq.${dateStr}&select=*&order=created_at.desc&limit=500`
+    });
+    if(!rows||!rows.length){
+      $('hotPicks').innerHTML='<div class="hot-pick-empty">今日尚無VIP好手熱推，VIP到各路好手留言板留言後會自動出現。</div>';
+      return;
+    }
+    const userMap=await v32UsersMap();
+    const gameMap=v34AllGameKeyMap(dateStr);
+    const bestByGame={};
+    rows.forEach(r=>{
+      const u=userMap[r.account]||{};
+      const acc=v34AccuracyFromUser(u);
+      const current=bestByGame[r.game_key];
+      const newer=!current || new Date(r.created_at)>new Date(current.created_at);
+      if(!current || acc>current.acc || (acc===current.acc && newer)){
+        bestByGame[r.game_key]={...r,acc,user:u};
+      }
+    });
+    const bestRows=Object.values(bestByGame).sort((a,b)=>b.acc-a.acc || new Date(b.created_at)-new Date(a.created_at)).slice(0,8);
+    if(!bestRows.length){
+      $('hotPicks').innerHTML='<div class="hot-pick-empty">今日尚無可顯示熱推。</div>';
+      return;
+    }
+    $('hotPicks').innerHTML=bestRows.map(r=>{
+      const g=gameMap[r.game_key];
+      const gameTitle=g?`${g.away} vs ${g.home}`:'今日賽事';
+      return `<div class="rounded-xl bg-slate-950 border border-slate-800 p-3">
+        <div class="flex justify-between gap-2">
+          <b class="text-amber-300">🔥 ${r.nickname||'匿名'}</b>
+          <span class="text-emerald-300 font-black">${r.acc}%</span>
+        </div>
+        <div class="text-xs text-slate-500 font-black mt-1">${gameTitle}</div>
+        <div class="text-blue-300 font-black mt-1">${r.market_pick||'未選盤口'}</div>
+        <div class="text-xs text-slate-500 font-black mt-2">${r.content||''}</div>
+      </div>`;
+    }).join('');
+  }catch(e){
+    console.warn('v34 hot picks failed',e);
+    $('hotPicks').innerHTML='<div class="hot-pick-empty">好手熱推讀取失敗，請確認 comments 欄位與權限。</div>';
+  }
+}
+renderHotPicks=function(){
+  if($('hotPicks')) $('hotPicks').innerHTML='<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">熱推載入中...</div>';
+  v32RenderHotPicks();
+};
+v32RenderHotPicks();
 </script>
 
 </body>
