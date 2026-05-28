@@ -252,7 +252,7 @@ img{
         <p class="text-sm text-slate-400 mt-2">歡迎交流，有任何疑問歡迎聯繫管理員</p>
       </div>
       <div class="xl:text-right space-y-3">
-        <div id="levelStats" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] font-black"></div>
+        <div id="levelStats" class="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] font-black"><div class="rounded-full bg-slate-900 border border-slate-700 px-3 py-2 text-slate-300">🌱 體育萌新 <span>0</span></div><div class="rounded-full bg-emerald-400/10 border border-emerald-400/20 px-3 py-2 text-emerald-300">💎 一般會員 <span>0</span></div><div class="rounded-full bg-amber-400/10 border border-amber-400/20 px-3 py-2 text-amber-300">👑 VIP會員 <span>0</span></div><div class="rounded-full bg-fuchsia-400/10 border border-fuchsia-400/20 px-3 py-2 text-fuchsia-300">🏆 體育大神 <span>0</span></div></div>
         <div class="flex flex-wrap xl:justify-end items-center gap-2 text-[11px] font-black">
           <div class="rounded-full bg-slate-900 border border-slate-700 px-3 py-2 text-slate-300">總共在線 <span id="onlineTotal">0</span></div>
           <div id="adminOnline" class="flex flex-wrap gap-2"></div>
@@ -592,17 +592,11 @@ function roleEmoji(role){ return role==='體育大神'?'🏆':role==='VIP會員'
 function roleColor(role){ return role==='體育大神'?'text-fuchsia-300':role==='VIP會員'?'text-amber-300':role==='一般會員'?'text-emerald-300':'text-slate-300'; }
 
 function renderAuthUI(){
+  // v43: 上方在線人數統一交給 v41RefreshTopOnline() 讀 online_base_settings 後再渲染，
+  // 避免頁面剛載入時先顯示舊版預設數字，幾秒後又跳成後台設定數字。
   const me=getCurrentUser();
-  const counts={...baseCounts};
-  if(me) counts[me.role]=(counts[me.role]||0)+1;
-  $('levelStats').innerHTML=`<div class="rounded-full bg-slate-900 border border-slate-700 px-3 py-2 text-slate-300">🌱 體育萌新 <span>${counts['體育萌新']}</span></div><div class="rounded-full bg-emerald-400/10 border border-emerald-400/20 px-3 py-2 text-emerald-300">💎 一般會員 <span>${counts['一般會員']}</span></div><div class="rounded-full bg-amber-400/10 border border-amber-400/20 px-3 py-2 text-amber-300">👑 VIP會員 <span>${counts['VIP會員']}</span></div><div class="rounded-full bg-fuchsia-400/10 border border-fuchsia-400/20 px-3 py-2 text-fuchsia-300">🏆 體育大神 <span>${counts['體育大神']}</span></div>`;
-  $('onlineTotal').textContent=String(Object.values(counts).reduce((a,b)=>a+b,0));
-  const admin=[];
-  if(me&&me.account==='paoge5888') admin.push('<div class="admin-chip">砲哥上線中</div>');
-  if(me&&me.account==='yao88') admin.push('<div class="admin-chip">龍女上線中</div>');
-  $('adminOnline').innerHTML=admin.join('');
-  $('authStatusWrap').innerHTML=me?`<div class="user-chip">${roleEmoji(me.role)} ${me.nickname}</div>`:'';
-  $('logoutBtn').classList.toggle('hidden',!me);
+  if($('authStatusWrap')) $('authStatusWrap').innerHTML=me?`<div class="user-chip">${roleEmoji(me.role)} ${me.nickname}</div>`:'';
+  if($('logoutBtn')) $('logoutBtn').classList.toggle('hidden',!me);
 }
 
 function openAuthModal(mode='login'){ $('authModal').classList.remove('hidden'); switchAuthTab(mode); }
@@ -1603,8 +1597,7 @@ async function v30RefreshTopOnline(){
 /* Override older top-right refresh functions so static frontend counts do not control it anymore. */
 renderAuthUI = function(){ v30RefreshTopOnline(); };
 dbRefreshStatus = async function(){ await v30RefreshTopOnline(); };
-v30RefreshTopOnline();
-setInterval(v30RefreshTopOnline, 10*60*1000);
+/* v44: disabled old v30 startup refresh; keep 0 until final online count is computed. */
 </script>
 
 
@@ -2277,8 +2270,7 @@ async function v35RefreshTopOnline(){
 }
 renderAuthUI=function(){ v35RefreshTopOnline(); };
 dbRefreshStatus=async function(){ await v35RefreshTopOnline(); };
-v35RefreshTopOnline();
-setInterval(v35RefreshTopOnline,10*60*1000);
+/* v44: disabled old v35 startup refresh; keep 0 until final online count is computed. */
 
 /* Lock clickable areas by permission */
 const v35OldOpenGame=openGame;
@@ -2579,13 +2571,12 @@ logout = (function(fn){
   };
 })(logout);
 
-v40RefreshTopOnline();
-setInterval(v40RefreshTopOnline,10*60*1000);
+// v44: disabled old v40 startup refresh; final refresh happens in v41/v44 block below.
 </script>
 
 
 <script>
-/* ===== v41: online base counts controlled by Supabase table online_base_settings ===== */
+/* ===== v44: show 0 first, then render stable online count after all DB data is computed ===== */
 const V41_DEFAULT_ONLINE_BASES = {
   '體育萌新': {morning_base:50, day_base:60, night_base:20},
   '一般會員': {morning_base:10, day_base:50, night_base:30},
@@ -2626,6 +2617,22 @@ function v41PickBaseByHour(setting,hour){
   if(hour>=12 && hour<24) return Number(setting.day_base||0);
   return Number(setting.night_base||0);
 }
+
+function v44RenderOnlineZeros(){
+  const meta={
+    '體育萌新':['🌱','bg-slate-900 border border-slate-700 text-slate-300'],
+    '一般會員':['💎','bg-emerald-400/10 border border-emerald-400/20 text-emerald-300'],
+    'VIP會員':['👑','bg-amber-400/10 border border-amber-400/20 text-amber-300'],
+    '體育大神':['🏆','bg-fuchsia-400/10 border border-fuchsia-400/20 text-fuchsia-300']
+  };
+  const roles=['體育萌新','一般會員','VIP會員','體育大神'];
+  if($('levelStats')){
+    $('levelStats').innerHTML=roles.map(r=>`<div class="rounded-full ${meta[r][1]} px-3 py-2">${meta[r][0]} ${r} <span>0</span></div>`).join('');
+  }
+  if($('onlineTotal')) $('onlineTotal').textContent='0';
+  if($('adminOnline')) $('adminOnline').innerHTML='';
+}
+
 async function v41RefreshTopOnline(){
   const h=new Date().getHours();
   const roles=['體育萌新','一般會員','VIP會員','體育大神'];
@@ -2666,7 +2673,7 @@ async function v41RefreshTopOnline(){
   if(badge && sbReady()){ badge.classList.remove('off'); badge.textContent='資料庫已連線'; }
 }
 
-/* Override previous v40/v35/v30 top-online functions */
+/* Override previous v40/v35/v30 top-online functions; only this function may update top online counts */
 v40RefreshTopOnline = v41RefreshTopOnline;
 v35RefreshTopOnline = v41RefreshTopOnline;
 v30RefreshTopOnline = v41RefreshTopOnline;
