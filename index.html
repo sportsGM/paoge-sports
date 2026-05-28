@@ -2387,5 +2387,285 @@ renderGames();
 renderHotPicks();
 </script>
 
+
+<script>
+/* ===== v40 final: fixed time-slot online counts + stable DB login ===== */
+function v40CurrentUser(){ return getCurrentUser && getCurrentUser(); }
+
+function v40OnlineBase(role,hour){
+  if(role==='體育萌新'){
+    if(hour>=7 && hour<12) return 50;
+    if(hour>=12 && hour<24) return 60;
+    return 20;
+  }
+  if(role==='一般會員'){
+    if(hour>=7 && hour<12) return 10;
+    if(hour>=12 && hour<24) return 50;
+    return 30;
+  }
+  if(role==='VIP會員'){
+    if(hour>=7 && hour<12) return 100;
+    if(hour>=12 && hour<24) return 250;
+    return 80;
+  }
+  if(role==='體育大神'){
+    if(hour>=7 && hour<12) return 8;
+    if(hour>=12 && hour<24) return 18;
+    return 10;
+  }
+  return 0;
+}
+
+async function v40RefreshTopOnline(){
+  const h=new Date().getHours();
+  const roles=['體育萌新','一般會員','VIP會員','體育大神'];
+  const real={'體育萌新':0,'一般會員':0,'VIP會員':0,'體育大神':0};
+  const meta={
+    '體育萌新':['🌱','bg-slate-900 border border-slate-700 text-slate-300'],
+    '一般會員':['💎','bg-emerald-400/10 border border-emerald-400/20 text-emerald-300'],
+    'VIP會員':['👑','bg-amber-400/10 border border-amber-400/20 text-amber-300'],
+    '體育大神':['🏆','bg-fuchsia-400/10 border border-fuchsia-400/20 text-fuchsia-300']
+  };
+  let admin=[];
+  try{
+    const users=await sbFetch('app_users',{query:'?select=account,role,is_online,nickname'});
+    (users||[]).forEach(u=>{
+      if(u.is_online && real[u.role]!==undefined) real[u.role]+=1;
+      if(u.account==='paoge5888' && u.is_online) admin.push('<div class="admin-chip">砲哥上線中</div>');
+      if(u.account==='yao88' && u.is_online) admin.push('<div class="admin-chip">龍女上線中</div>');
+    });
+  }catch(e){ console.warn('v40 online read failed',e); }
+
+  let total=0;
+  if($('levelStats')){
+    $('levelStats').innerHTML=roles.map(r=>{
+      const num=v40OnlineBase(r,h)+(real[r]||0);
+      total+=num;
+      return `<div class="rounded-full ${meta[r][1]} px-3 py-2">${meta[r][0]} ${r} <span>${num}</span></div>`;
+    }).join('');
+  }
+  if($('onlineTotal')) $('onlineTotal').textContent=String(total);
+  if($('adminOnline')) $('adminOnline').innerHTML=admin.join('');
+
+  const me=v40CurrentUser();
+  if($('authStatusWrap')) $('authStatusWrap').innerHTML=me?`<div class="user-chip">${roleEmoji(me.role)} ${me.nickname}</div>`:'';
+  if($('logoutBtn')) $('logoutBtn').classList.toggle('hidden',!me);
+
+  const badge=$('dbStatus');
+  if(badge && sbReady()){ badge.classList.remove('off'); badge.textContent='資料庫已連線'; }
+}
+
+/* Stop previous v30 online_stats from taking over */
+v30LoadAndMaybeUpdateOnlineStats = async function(){ return []; };
+v30RefreshTopOnline = v40RefreshTopOnline;
+v35RefreshTopOnline = v40RefreshTopOnline;
+dbRefreshStatus = v40RefreshTopOnline;
+renderAuthUI = function(){ v40RefreshTopOnline(); };
+
+/* Stable DB login/register/logout */
+submitLogin = async function(){
+  const acc=$('loginAccount').value.trim();
+  const pw=$('loginPassword').value.trim();
+  try{
+    const rows=await sbFetch('app_users',{query:`?account=eq.${encodeURIComponent(acc)}&select=*`});
+    const row=rows&&rows[0];
+    if(!row || String(row.password)!==String(pw)){
+      return showAuthMsg('帳號或密碼錯誤',false);
+    }
+    await sbFetch('app_users',{
+      method:'PATCH',
+      query:`?account=eq.${encodeURIComponent(acc)}`,
+      headers:{Prefer:'return=minimal'},
+      body:{is_online:true,last_seen:new Date().toISOString()}
+    });
+    setCurrentUser({
+      id:row.id,
+      account:row.account,
+      password:row.password,
+      nickname:row.nickname,
+      lineId:row.line_id,
+      role:row.role || '體育萌新',
+      monthRecommended:row.month_recommended||0,
+      monthWins:row.month_wins||0
+    });
+    closeAuthModal();
+    renderAuthUI();
+    renderMemberCenter();
+    renderGames();
+    renderHotPicks();
+  }catch(e){
+    showAuthMsg('登入失敗：'+e.message,false);
+  }
+};
+
+submitRegister = async function(){
+  const acc=$('regAccount').value.trim();
+  const pw=$('regPassword').value.trim();
+  const nick=$('regNickname').value.trim();
+  const line=$('regLine').value.trim();
+  if(!acc||!pw||!nick||!line) return showAuthMsg('請完整填寫註冊資料',false);
+  try{
+    const exists=await sbFetch('app_users',{query:`?account=eq.${encodeURIComponent(acc)}&select=account`});
+    if(exists && exists.length) return showAuthMsg('帳號已存在，請更換',false);
+    await sbFetch('app_users',{method:'POST',headers:{Prefer:'return=minimal'},body:{
+      account:acc,
+      password:pw,
+      nickname:nick,
+      line_id:line,
+      role:'體育萌新',
+      month_recommended:0,
+      month_wins:0,
+      is_online:false,
+      created_at:new Date().toISOString()
+    }});
+    $('loginAccount').value=acc;
+    $('loginPassword').value=pw;
+    switchAuthTab('login');
+    showAuthMsg('註冊成功，請直接登入');
+  }catch(e){
+    showAuthMsg('註冊失敗：'+e.message,false);
+  }
+};
+
+logout = async function(){
+  const me=getCurrentUser&&getCurrentUser();
+  if(me){
+    try{
+      await sbFetch('app_users',{
+        method:'PATCH',
+        query:`?account=eq.${encodeURIComponent(me.account)}`,
+        headers:{Prefer:'return:minimal'},
+        body:{is_online:false,last_seen:new Date().toISOString()}
+      });
+    }catch(e){}
+  }
+  setCurrentUser(null);
+  renderAuthUI();
+  renderMemberCenter();
+  renderGames();
+  renderHotPicks();
+};
+logout = (function(fn){
+  return async function(){
+    const me=getCurrentUser&&getCurrentUser();
+    if(me){
+      try{
+        await sbFetch('app_users',{
+          method:'PATCH',
+          query:`?account=eq.${encodeURIComponent(me.account)}`,
+          headers:{Prefer:'return=minimal'},
+          body:{is_online:false,last_seen:new Date().toISOString()}
+        });
+      }catch(e){}
+    }
+    setCurrentUser(null);
+    renderAuthUI();
+    renderMemberCenter();
+    renderGames();
+    renderHotPicks();
+  };
+})(logout);
+
+v40RefreshTopOnline();
+setInterval(v40RefreshTopOnline,10*60*1000);
+</script>
+
+
+<script>
+/* ===== v41: online base counts controlled by Supabase table online_base_settings ===== */
+const V41_DEFAULT_ONLINE_BASES = {
+  '體育萌新': {morning_base:50, day_base:60, night_base:20},
+  '一般會員': {morning_base:10, day_base:50, night_base:30},
+  'VIP會員': {morning_base:100, day_base:250, night_base:80},
+  '體育大神': {morning_base:8, day_base:18, night_base:10}
+};
+let v41OnlineSettingsCache = null;
+let v41OnlineSettingsAt = 0;
+
+async function v41LoadOnlineSettings(){
+  const now = Date.now();
+  if(v41OnlineSettingsCache && (now - v41OnlineSettingsAt) < 60*1000){
+    return v41OnlineSettingsCache;
+  }
+  const settings = JSON.parse(JSON.stringify(V41_DEFAULT_ONLINE_BASES));
+  try{
+    const rows = await sbFetch('online_base_settings',{
+      query:'?active=eq.true&select=role,morning_base,day_base,night_base'
+    });
+    (rows||[]).forEach(r=>{
+      if(settings[r.role]){
+        settings[r.role] = {
+          morning_base:Number(r.morning_base ?? settings[r.role].morning_base),
+          day_base:Number(r.day_base ?? settings[r.role].day_base),
+          night_base:Number(r.night_base ?? settings[r.role].night_base)
+        };
+      }
+    });
+  }catch(e){
+    console.warn('v41 online_base_settings not ready, using defaults', e);
+  }
+  v41OnlineSettingsCache = settings;
+  v41OnlineSettingsAt = now;
+  return settings;
+}
+function v41PickBaseByHour(setting,hour){
+  if(hour>=7 && hour<12) return Number(setting.morning_base||0);
+  if(hour>=12 && hour<24) return Number(setting.day_base||0);
+  return Number(setting.night_base||0);
+}
+async function v41RefreshTopOnline(){
+  const h=new Date().getHours();
+  const roles=['體育萌新','一般會員','VIP會員','體育大神'];
+  const real={'體育萌新':0,'一般會員':0,'VIP會員':0,'體育大神':0};
+  const meta={
+    '體育萌新':['🌱','bg-slate-900 border border-slate-700 text-slate-300'],
+    '一般會員':['💎','bg-emerald-400/10 border border-emerald-400/20 text-emerald-300'],
+    'VIP會員':['👑','bg-amber-400/10 border border-amber-400/20 text-amber-300'],
+    '體育大神':['🏆','bg-fuchsia-400/10 border border-fuchsia-400/20 text-fuchsia-300']
+  };
+  let admin=[];
+  try{
+    const users=await sbFetch('app_users',{query:'?select=account,role,is_online,nickname'});
+    (users||[]).forEach(u=>{
+      if(u.is_online && real[u.role]!==undefined) real[u.role]+=1;
+      if(u.account==='paoge5888' && u.is_online) admin.push('<div class="admin-chip">砲哥上線中</div>');
+      if(u.account==='yao88' && u.is_online) admin.push('<div class="admin-chip">龍女上線中</div>');
+    });
+  }catch(e){ console.warn('v41 online users failed',e); }
+
+  const bases = await v41LoadOnlineSettings();
+  let total=0;
+  if($('levelStats')){
+    $('levelStats').innerHTML=roles.map(r=>{
+      const base = v41PickBaseByHour(bases[r] || V41_DEFAULT_ONLINE_BASES[r], h);
+      const num = base + (real[r]||0);
+      total += num;
+      return `<div class="rounded-full ${meta[r][1]} px-3 py-2">${meta[r][0]} ${r} <span>${num}</span></div>`;
+    }).join('');
+  }
+  if($('onlineTotal')) $('onlineTotal').textContent=String(total);
+  if($('adminOnline')) $('adminOnline').innerHTML=admin.join('');
+
+  const me=getCurrentUser&&getCurrentUser();
+  if($('authStatusWrap')) $('authStatusWrap').innerHTML=me?`<div class="user-chip">${roleEmoji(me.role)} ${me.nickname}</div>`:'';
+  if($('logoutBtn')) $('logoutBtn').classList.toggle('hidden',!me);
+  const badge=$('dbStatus');
+  if(badge && sbReady()){ badge.classList.remove('off'); badge.textContent='資料庫已連線'; }
+}
+
+/* Override previous v40/v35/v30 top-online functions */
+v40RefreshTopOnline = v41RefreshTopOnline;
+v35RefreshTopOnline = v41RefreshTopOnline;
+v30RefreshTopOnline = v41RefreshTopOnline;
+dbRefreshStatus = v41RefreshTopOnline;
+renderAuthUI = function(){ v41RefreshTopOnline(); };
+
+v41RefreshTopOnline();
+setInterval(()=>{
+  v41OnlineSettingsCache = null;
+  v41RefreshTopOnline();
+},10*60*1000);
+</script>
+
 </body>
 </html>
