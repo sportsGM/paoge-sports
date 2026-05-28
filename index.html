@@ -133,6 +133,11 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
 .db-badge.off{border-color:rgba(251,191,36,.22);background:rgba(251,191,36,.08);color:#fcd34d}
 #dbStatus{display:inline-flex;margin-left:6px}
 
+
+.synced-rank-row{display:flex;justify-content:space-between;align-items:center;gap:10px;border-radius:12px;background:#020617;border:1px solid rgba(148,163,184,.12);padding:10px 12px}
+.synced-rank-row .name{font-size:.88rem;font-weight:900;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.synced-rank-row .score{font-size:.86rem;font-weight:950;color:#34d399;white-space:nowrap}
+
 </style>
 <script src="./config.js"></script>
 </head>
@@ -1007,6 +1012,96 @@ moveGrandma = function(){ oldMoveGrandma(); incrementInteraction('grandma'); };
 /* Refresh on load */
 dbRefreshStatus();
 setInterval(dbRefreshStatus, 30000);
+</script>
+
+
+<script>
+/* ===== v22 interaction sync: load woodfish / grandma counts from Supabase after F5 ===== */
+function currentInteractionIdentity(){
+  const me = getCurrentUser && getCurrentUser();
+  return {
+    account: me ? me.account : 'guest_device',
+    nickname: me ? me.nickname : '訪客'
+  };
+}
+async function fetchInteractionRows(type){
+  try{
+    return await sbFetch('interaction_counts',{
+      query:`?interaction_type=eq.${encodeURIComponent(type)}&select=*&order=count.desc&limit=10`
+    });
+  }catch(e){
+    console.warn('fetchInteractionRows failed', type, e);
+    return [];
+  }
+}
+async function interactionTotal(type){
+  const rows = await fetchInteractionRows(type);
+  return rows.reduce((sum,r)=>sum+Number(r.count||0),0);
+}
+function renderInteractionRank(targetId, rows, unit){
+  const box = document.getElementById(targetId);
+  if(!box) return;
+  const top = rows.slice(0,6);
+  if(!top.length){
+    box.innerHTML = `<div class="synced-rank-row"><span class="name">目前尚無排行</span><span class="score">0 ${unit}</span></div>`;
+    return;
+  }
+  box.innerHTML = top.map((r,idx)=>`
+    <div class="synced-rank-row">
+      <span class="name">${idx+1}. ${r.nickname || r.account || '匿名'}</span>
+      <span class="score">${Number(r.count||0)} ${unit}</span>
+    </div>
+  `).join('');
+}
+async function refreshInteractionCounters(){
+  if(!sbReady()) return;
+  const woodRows = await fetchInteractionRows('woodfish');
+  const grandmaRows = await fetchInteractionRows('grandma');
+  const woodTotal = woodRows.reduce((sum,r)=>sum+Number(r.count||0),0);
+  const grandmaTotal = grandmaRows.reduce((sum,r)=>sum+Number(r.count||0),0);
+  if($('woodCount')) $('woodCount').textContent = String(woodTotal || 0);
+  if($('grandmaCount')) $('grandmaCount').textContent = String(grandmaTotal || 0);
+  renderInteractionRank('woodRankList', woodRows, '下');
+  renderInteractionRank('grandmaRankList', grandmaRows, '次');
+}
+async function upsertInteraction(type){
+  const who = currentInteractionIdentity();
+  try{
+    const rows = await sbFetch('interaction_counts',{
+      query:`?account=eq.${encodeURIComponent(who.account)}&interaction_type=eq.${encodeURIComponent(type)}&select=*`
+    });
+    if(rows && rows[0]){
+      await sbFetch('interaction_counts',{
+        method:'PATCH',
+        query:`?id=eq.${rows[0].id}`,
+        headers:{Prefer:'return=minimal'},
+        body:{count:Number(rows[0].count||0)+1,nickname:who.nickname,updated_at:new Date().toISOString()}
+      });
+    }else{
+      await sbFetch('interaction_counts',{
+        method:'POST',
+        headers:{Prefer:'return=minimal'},
+        body:{account:who.account,nickname:who.nickname,interaction_type:type,count:1,updated_at:new Date().toISOString()}
+      });
+    }
+  }catch(e){
+    console.warn('upsertInteraction failed', type, e);
+  }
+  await refreshInteractionCounters();
+}
+/* Keep existing animations, but make the visible number come from DB after click */
+const v22OldKnockWood = knockWood;
+knockWood = async function(){
+  v22OldKnockWood();
+  await upsertInteraction('woodfish');
+};
+const v22OldMoveGrandma = moveGrandma;
+moveGrandma = async function(){
+  v22OldMoveGrandma();
+  await upsertInteraction('grandma');
+};
+refreshInteractionCounters();
+setInterval(refreshInteractionCounters, 20000);
 </script>
 
 </body>
