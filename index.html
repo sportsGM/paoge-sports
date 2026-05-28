@@ -157,6 +157,59 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
 .simple-rank{display:grid;gap:8px}
 .simple-rank > .rank-line{display:none !important}
 
+
+/* v31 basic front-end deterrent */
+html,body{
+  -webkit-user-select:none;
+  -moz-user-select:none;
+  -ms-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;
+}
+input,textarea,[contenteditable="true"]{
+  -webkit-user-select:text !important;
+  -moz-user-select:text !important;
+  -ms-user-select:text !important;
+  user-select:text !important;
+}
+img{
+  -webkit-user-drag:none;
+  user-drag:none;
+  pointer-events:auto;
+}
+#securityOverlay{
+  position:fixed;
+  inset:0;
+  z-index:999999;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  background:rgba(2,6,23,.96);
+  backdrop-filter:blur(12px);
+  color:#e5e7eb;
+  padding:24px;
+  text-align:center;
+}
+#securityOverlay .box{
+  max-width:420px;
+  border:1px solid rgba(251,191,36,.25);
+  background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(2,6,23,.98));
+  border-radius:28px;
+  padding:28px;
+  box-shadow:0 25px 80px rgba(0,0,0,.45);
+}
+#securityOverlay .title{
+  font-size:1.3rem;
+  font-weight:950;
+  color:#fbbf24;
+  margin-bottom:10px;
+}
+#securityOverlay .desc{
+  font-size:.95rem;
+  line-height:1.7;
+  color:#cbd5e1;
+}
+
 </style>
 <script src="./config.js"></script>
 </head>
@@ -1521,6 +1574,83 @@ renderAuthUI = function(){ v30RefreshTopOnline(); };
 dbRefreshStatus = async function(){ await v30RefreshTopOnline(); };
 v30RefreshTopOnline();
 setInterval(v30RefreshTopOnline, 10*60*1000);
+</script>
+
+
+<div id="securityOverlay">
+  <div class="box">
+    <div class="title">系統保護中</div>
+    <div class="desc">此頁面禁止開啟開發者工具、右鍵與檢視原始碼。<br>請關閉相關工具後重新整理頁面。</div>
+  </div>
+</div>
+
+
+<script>
+/* ===== v31 front-end deterrent: right-click / hotkeys / devtools overlay ===== */
+(function(){
+  const showSecurityOverlay = () => {
+    const el = document.getElementById('securityOverlay');
+    if(el) el.style.display = 'flex';
+  };
+
+  const block = (e) => {
+    if(!e) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  };
+
+  document.addEventListener('contextmenu', block, true);
+  document.addEventListener('dragstart', block, true);
+  document.addEventListener('selectstart', function(e){
+    const t = e.target;
+    const tag = t && t.tagName ? t.tagName.toLowerCase() : '';
+    if(tag === 'input' || tag === 'textarea' || (t && t.isContentEditable)) return true;
+    return block(e);
+  }, true);
+
+  document.addEventListener('keydown', function(e){
+    const key = (e.key || '').toLowerCase();
+    const code = e.keyCode || e.which;
+
+    const blocked =
+      code === 123 ||                         // F12
+      (e.ctrlKey && key === 'u') ||            // Ctrl+U
+      (e.ctrlKey && key === 's') ||            // Ctrl+S
+      (e.ctrlKey && key === 'p') ||            // Ctrl+P
+      (e.ctrlKey && e.shiftKey && key === 'i') || // Ctrl+Shift+I
+      (e.ctrlKey && e.shiftKey && key === 'j') || // Ctrl+Shift+J
+      (e.ctrlKey && e.shiftKey && key === 'c') || // Ctrl+Shift+C
+      (e.metaKey && e.altKey && key === 'i') ||   // Mac devtools
+      (e.metaKey && e.altKey && key === 'j') ||
+      (e.metaKey && e.altKey && key === 'c');
+
+    if(blocked){
+      showSecurityOverlay();
+      return block(e);
+    }
+  }, true);
+
+  // DevTools size heuristic. This is only a deterrent, not real security.
+  let devtoolsOpen = false;
+  const checkDevtools = () => {
+    const threshold = 170;
+    const widthGap = Math.abs(window.outerWidth - window.innerWidth);
+    const heightGap = Math.abs(window.outerHeight - window.innerHeight);
+    const opened = widthGap > threshold || heightGap > threshold;
+
+    if(opened && !devtoolsOpen){
+      devtoolsOpen = true;
+      showSecurityOverlay();
+    }
+  };
+  setInterval(checkDevtools, 1200);
+
+  // Stop common console probing from staying useful.
+  try{
+    Object.defineProperty(window, '__SPORTS_GM_PROTECTED__', {value:true, writable:false});
+  }catch(e){}
+})();
 </script>
 
 </body>
