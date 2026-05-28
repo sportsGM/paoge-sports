@@ -111,26 +111,138 @@ async function scrapePlaySport() {
   return [...unique.values()].slice(0, 80);
 }
 
-async function upsertDailyGames(rows) {
-  if (!rows.length) throw new Error('No games parsed from PlaySport. Check selectors or source availability.');
-  const url = `${SUPABASE_URL}/rest/v1/daily_games?on_conflict=game_date,league,away,home`;
+async function supabaseRequest(path, options = {}) {
+  const url = `${SUPABASE_URL}/rest/v1/${path}`;
   const res = await fetch(url, {
-    method: 'POST',
+    ...options,
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       'Content-Type': 'application/json',
-      Prefer: 'resolution=merge-duplicates,return=minimal'
-    },
+      ...(options.headers || {})
+    }
+  });
+  const txt = await res.text();
+  if (!res.ok) throw new Error(txt || `${res.status} ${res.statusText}`);
+  try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
+}
+
+function dateTW(offsetDays = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(d);
+}
+
+async function writeSyncStatus(status, message, count = 0) {
+  // 如果你有跑 v54 status SQL，就會記錄狀態；沒跑也不影響同步。
+  try {
+    await supabaseRequest('daily_sync_status?on_conflict=sync_date,source_name', {
+      method: 'POST',
+      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify([{
+        sync_date: dateTW(0),
+        source_name: 'playsport',
+        status,
+        message,
+        games_count: count,
+        updated_at: new Date().toISOString()
+      }])
+    });
+  } catch (e) {
+    console.warn('daily_sync_status not written:', e.message);
+  }
+}
+
+async function archiveTodayToYesterday(reason = 'PlaySport parsed 0 games') {
+  const today = dateTW(0);
+  const yesterday = dateTW(-1);
+  let rows = [];
+
+  try {
+    rows = await supabaseRequest(
+      `daily_games?game_date=eq.${today}&active=eq.true&select=*`
+    ) || [];
+  } catch (e) {
+    console.warn('Could not read today rows for archive:', e.message);
+  }
+
+  if (!rows.length) {
+    console.log('No active today rows to move into yesterday. Today will stay empty.');
+    await writeSyncStatus('empty', `${reason}; no active today rows to archive`, 0);
+    return;
+  }
+
+  const archived = rows.map(r => {
+    const analysis = (r.analysis_json && typeof r.analysis_json === 'object') ? r.analysis_json : {};
+    const copy = {
+      game_date: yesterday,
+      sport: r.sport,
+      league: r.league,
+      game_time: r.game_time,
+      away: r.away,
+      home: r.home,
+      money: r.money,
+      spread: r.spread,
+      total: r.total,
+      confidence: r.confidence,
+      source_url: r.source_url,
+      source_name: r.source_name || '每日同步',
+      analysis_json: {
+        ...analysis,
+        archived_from_today: today,
+        archive_reason: reason
+      },
+      active: true,
+      updated_at: new Date().toISOString()
+    };
+    return copy;
+  });
+
+  await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(archived)
+  });
+
+  await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({
+      active: false,
+      updated_at: new Date().toISOString()
+    })
+  });
+
+  console.log(`PlaySport parsed 0 games. Moved ${archived.length} active today rows to yesterday (${yesterday}) and cleared today.`);
+  await writeSyncStatus('empty_archived', `${reason}; moved active today rows to yesterday`, archived.length);
+}
+
+async function upsertDailyGames(rows) {
+  if (!rows.length) {
+    await archiveTodayToYesterday('PlaySport parsed 0 games');
+    return;
+  }
+
+  const urlPath = `daily_games?on_conflict=game_date,league,away,home`;
+  await supabaseRequest(urlPath, {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
     body: JSON.stringify(rows)
   });
-  if (!res.ok) throw new Error(await res.text());
+
+  await writeSyncStatus('success', `Synced ${rows.length} games`, rows.length);
 }
 
 async function main() {
   const games = await scrapePlaySport();
   await upsertDailyGames(games);
-  console.log(`Synced ${games.length} games to Supabase daily_games.`);
+  if (games.length) {
+    console.log(`Synced ${games.length} games to Supabase daily_games.`);
+  } else {
+    console.log('No games parsed. Today rows were moved to yesterday if any existed, and workflow ended successfully.');
+  }
 }
 
 main().catch(err => {
