@@ -1,0 +1,22 @@
+name: Hourly sports sync
+
+on:
+  schedule:
+    # 每小時自動更新一次；GitHub cron 使用 UTC，這裡每小時第 7 分鐘執行。
+    # GitHub Actions 可能會延遲幾分鐘，屬正常現象。
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm run sync:sports
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
