@@ -1965,6 +1965,7 @@ function setGameDayMode(mode){
   renderLeagues();
   renderGames();
   renderHotPicks();
+  if(typeof v52LoadDailyGames==='function') v52LoadDailyGames();
 }
 const v33OldRenderGames = renderGames;
 renderGames = function(){
@@ -2640,10 +2641,10 @@ logout = (function(fn){
 <script>
 /* ===== v46: show 0 first, then render stable online count after all DB data is computed; no old pre-render ===== */
 const V41_DEFAULT_ONLINE_BASES = {
-  '體育萌新': {morning_base:50, day_base:60, night_base:20},
-  '一般會員': {morning_base:10, day_base:50, night_base:30},
-  'VIP會員': {morning_base:100, day_base:250, night_base:80},
-  '體育大神': {morning_base:8, day_base:18, night_base:10}
+  '體育萌新': {morning_base:0, day_base:0, night_base:0},
+  '一般會員': {morning_base:0, day_base:0, night_base:0},
+  'VIP會員': {morning_base:0, day_base:0, night_base:0},
+  '體育大神': {morning_base:0, day_base:0, night_base:0}
 };
 let v41OnlineSettingsCache = null;
 let v41OnlineSettingsAt = 0;
@@ -2668,7 +2669,7 @@ async function v41LoadOnlineSettings(){
       }
     });
   }catch(e){
-    console.warn('v41 online_base_settings not ready, using defaults', e);
+    console.warn('v52 online_base_settings not ready, keep 0 instead of old fake bases', e);
   }
   v41OnlineSettingsCache = settings;
   v41OnlineSettingsAt = now;
@@ -2801,6 +2802,77 @@ setInterval(()=>{
   v41OnlineSettingsCache = null;
   v41RefreshTopOnline();
 },10*60*1000);
+</script>
+
+
+<script>
+/* ===== v53: daily_games hourly sync reader =====
+   GitHub Actions writes PlaySport/Yahoo/SofaScore-derived games into Supabase daily_games.
+   Frontend reads that table and replaces static demo games when rows exist.
+*/
+function v52TodayTW(offsetDays=0){
+  try{
+    const d=new Date();
+    d.setDate(d.getDate()+offsetDays);
+    return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit'}).format(d);
+  }catch(e){
+    const d=new Date();
+    d.setDate(d.getDate()+offsetDays);
+    return d.toISOString().slice(0,10);
+  }
+}
+function v53DailyGamesDate(){
+  return (typeof v33DayMode!=='undefined' && v33DayMode==='yesterday') ? v52TodayTW(-1) : v52TodayTW(0);
+}
+function v52NormalizeDailyGame(r){
+  return {
+    time:r.game_time || '',
+    away:r.away || '客隊',
+    home:r.home || '主隊',
+    money:r.money || ((r.home||'主隊')+'勝'),
+    spread:r.spread || ((r.home||'主隊')+' -1.5'),
+    total:r.total || (r.sport==='football'?'大 2.5':r.sport==='basketball'?'小 223.5':'大 8.5'),
+    sport:r.sport || 'baseball',
+    conf:Array.isArray(r.confidence) ? r.confidence : [60,60,60],
+    source_url:r.source_url || '',
+    source_name:r.source_name || '每日同步',
+    analysis_json:r.analysis_json || {}
+  };
+}
+async function v52LoadDailyGames(){
+  if(!sbReady()) return;
+  try{
+    const rows=await sbFetch('daily_games',{
+      query:`?game_date=eq.${v53DailyGamesDate()}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=120`
+    });
+    if(!rows || !rows.length) return;
+    const grouped={};
+    rows.forEach(r=>{
+      const league=r.league || 'MLB';
+      if(!grouped[league]) grouped[league]=[];
+      grouped[league].push(v52NormalizeDailyGame(r));
+    });
+    Object.keys(grouped).forEach(k=>{ games[k]=grouped[k]; });
+    const availableBaseball=[['MLB','MLB'],['CPBL','中華職棒'],['NPB','日本職棒']].filter(x=>games[x[0]]?.length);
+    const availableBasketball=[['NBA','NBA'],['WNBA','WNBA']].filter(x=>games[x[0]]?.length);
+    const availableFootball=[['ECL','歐協杯'],['EPL','英超'],['INT','國際賽']].filter(x=>games[x[0]]?.length);
+    if(availableBaseball.length) leagues.baseball=availableBaseball;
+    if(availableBasketball.length) leagues.basketball=availableBasketball;
+    if(availableFootball.length) leagues.football=availableFootball;
+    if(!games[state.league]?.length){
+      const first=leagues[state.sport]?.[0]?.[0];
+      if(first) state.league=first;
+    }
+    renderLeagues();
+    renderGames();
+    const badge=document.querySelector('#gamesBlock .text-emerald-300');
+    if(badge) badge.textContent='資料同步中';
+  }catch(e){
+    console.warn('v52 daily_games load failed', e);
+  }
+}
+setTimeout(v52LoadDailyGames, 350);
+setInterval(v52LoadDailyGames, 60*60*1000);
 </script>
 
 </body>

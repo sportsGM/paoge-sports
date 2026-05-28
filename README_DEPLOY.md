@@ -1,37 +1,39 @@
-# v42 clean release 部署說明
+# v52 部署說明
 
-這包已經清掉舊版 SQL 與舊 README，避免誤跑舊 SQL 造成資料被覆蓋。
+## 1. 網站檔案
+把整包檔案覆蓋到 GitHub Pages 網站。
 
-## 正式上線需要上傳的檔案
+## 2. Supabase 必跑 SQL
+先跑：
 
-- index.html
-- config.js
-- assets/woodfish.png
-- assets/road.png
-- assets/grandma.png
+- `SQL_FIX_COMMENTS_INTERACTIONS_RLS_v52.sql`
 
-## Supabase 只需要跑這個
+這會修好：
 
-請到 Supabase SQL Editor 執行：
+- 好手熱推 comments 送出失敗
+- 木魚 / 阿嬤 interaction_counts 不累積
 
-- SQL_RUN_THIS_ONLY_v42.sql
+## 3. 每日賽事同步 SQL
+再跑：
 
-這個檔案會：
+- `SQL_DAILY_GAMES_SCHEMA_v52.sql`
 
-1. 建立 / 補齊目前網站需要的資料表與欄位
-2. 補齊 app_users / comments / predictions / interaction_counts / online_base_settings
-3. 開放目前前端需要的 anon 讀寫權限
-4. 清除 app_users 帳號密碼前後空格
-5. 重設兩個管理員帳號
+這會新增 `daily_games`，讓前台可以吃每日更新賽事。
 
-## 預設管理員帳號
+## 4. GitHub Actions 每日自動抓資料
+Repository Settings → Secrets and variables → Actions → New repository secret，新增：
 
-- paoge5888 / 123456
-- yao88 / 123456
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
 
-如果要改密碼，請先在 SQL_RUN_THIS_ONLY_v42.sql 裡搜尋 123456，改成你要的密碼再執行。
+之後 GitHub Actions 會每天台灣時間 06:10 / 12:10 / 18:10 跑：
 
-## 重要提醒
+- 玩運彩：抓預測賽事與盤口
+- Yahoo 奇摩運動：給棒球 / NBA 隊伍數據來源
+- SofaScore：給足球隊伍數據來源
 
-這版是前端直接連 Supabase REST API 的簡易營運版，所以 SQL 會 disable RLS 並開放 anon 權限。
-正式大流量營運或涉及真實個資/金流時，建議改成 Supabase Auth + RLS 或後端 API。
+目前 `scripts/daily_sports_sync.js` 已經建立同步流程與 Supabase 寫入；如果玩運彩頁面 HTML 改版，只要調整該 script 的 selector。
+
+
+## v53 每小時賽事更新
+GitHub Actions 已改成每小時第 7 分鐘執行一次。前台也會每小時重新讀取 daily_games。今日賽事讀取今天的 game_date，昨日賽事讀取昨天的 game_date。

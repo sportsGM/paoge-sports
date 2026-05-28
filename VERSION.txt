@@ -1,1 +1,4 @@
-v51 - homepage CSS-first no AI recommendation flash + World Cup info fixed
+v53_hourly_daily_games
+- GitHub Actions 每小時同步 daily_games
+- 前台每小時重新讀取 Supabase daily_games
+- 今日/昨日切換會讀對應 game_date
