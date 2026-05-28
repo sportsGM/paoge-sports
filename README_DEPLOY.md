@@ -15,3 +15,23 @@
 - Project URL: `https://azubzmuavfstxwzmrjvn.supabase.co`
 - Publishable key 已放入 `config.js`
 - Secret key 請放到後端平台的環境變數，例如 Vercel / Render / Railway / Supabase Edge Functions Secrets
+
+
+## v38 管理員開通方式
+
+玩家註冊後，資料會進入 Supabase 的 `app_users` 表。
+
+管理員不用每次跑 SQL，直接到：
+
+Supabase → Table Editor → app_users → 找到玩家帳號 → 修改 `role`
+
+角色可填：
+
+- 體育萌新
+- 一般會員
+- VIP會員
+- 體育大神
+
+詳細說明請看：
+
+`README_ADMIN_ROLE_EDIT_V38.md`

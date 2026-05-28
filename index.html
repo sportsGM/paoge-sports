@@ -232,6 +232,14 @@ img{
 .hot-submit{border:0;background:linear-gradient(90deg,#facc15,#34d399);color:#020617;border-radius:14px;padding:11px 16px;font-weight:950}
 .hot-cancel{border:1px solid rgba(148,163,184,.18);background:#0f172a;color:#e5e7eb;border-radius:14px;padding:11px 16px;font-weight:950}
 
+
+.lock-blur{filter:blur(7px);opacity:.42;pointer-events:none;user-select:none}
+.lock-card{position:relative;overflow:hidden}
+.lock-card:after{content:'權限不足';position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(2,6,23,.48);backdrop-filter:blur(5px);color:#fbbf24;font-weight:950;font-size:.92rem;letter-spacing:.08em;border-radius:inherit}
+.lock-overlay-click{cursor:pointer}
+.permission-lock-msg{border:1px solid rgba(251,191,36,.24);background:rgba(251,191,36,.08);color:#fcd34d;border-radius:16px;padding:14px;font-weight:950;text-align:center}
+.permission-mini{font-size:.74rem;color:#fbbf24;font-weight:900;margin-top:6px}
+
 </style>
 <script src="./config.js"></script>
 </head>
@@ -258,6 +266,7 @@ img{
       <button class="nav-btn" onclick="openMemberCenter()">會員中心</button>
       <button class="nav-btn" onclick="openAllRanks()">排行榜</button>
       <button class="nav-btn" onclick="openContact()">聯絡我們</button>
+      <button class="nav-btn" onclick="openPermissionModal()">權限等級</button>
       <button class="nav-btn" onclick="openBet()">我要投注</button>
       <button class="nav-btn" onclick="openAuthModal('login')">登入 / 註冊</button><span id="dbStatus" class="db-badge off">資料庫連線中</span>
       <button id="logoutBtn" class="nav-btn hidden" onclick="logout()">登出</button>
@@ -2151,6 +2160,231 @@ renderHotPicks=function(){
   v32RenderHotPicks();
 };
 v32RenderHotPicks();
+</script>
+
+
+<div id="permissionModal" class="hidden fixed inset-0 z-[80] bg-black/75 backdrop-blur-sm p-4 flex items-center justify-center">
+  <div class="card rounded-3xl p-5 max-w-3xl w-full max-h-[92vh] overflow-y-auto">
+    <div class="flex justify-between items-center mb-4">
+      <h3 class="text-xl font-black text-amber-300">權限等級</h3>
+      <button onclick="closePermissionModal()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
+    </div>
+    <div class="grid gap-3">
+      <div class="contact-block">
+        <div class="contact-title">🌱 體育萌新</div>
+        <div class="contact-text">剛註冊或未註冊玩家。只能查看每場賽事的獨贏方向，其餘功能需聯繫管理員開通。</div>
+      </div>
+      <div class="contact-block">
+        <div class="contact-title">💎 一般會員</div>
+        <div class="contact-text">點擊【聯絡我們】找管理員開通帳號。可查看玩家留言板與基本數據，但讓分、大小分、好手熱推與進階預測仍需升級。</div>
+      </div>
+      <div class="contact-block">
+        <div class="contact-title">👑 VIP會員</div>
+        <div class="contact-text">加入【專屬會員群】即可升級。可完整查看AI分析、讓分、大小分、各路好手熱推、排行榜詳情與全部資料。</div>
+      </div>
+      <div class="contact-block">
+        <div class="contact-title">🏆 體育大神</div>
+        <div class="contact-text">
+          每月可領當月限定好禮，每月好禮不一樣，歡迎多多參與。
+        </div>
+      </div>
+      <div class="contact-block">
+        <div class="contact-title">📈 升級規則</div>
+        <div class="contact-text">
+          1. 玩家權限為【VIP會員】<br>
+          2. 當月預測滿 50 場<br>
+          3. 準確率為 70% 以上
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+/* ===== v35 permissions + time-based online counts ===== */
+function v35Me(){ return getCurrentUser && getCurrentUser(); }
+function v35Role(){
+  const me=v35Me();
+  return me ? (me.role || '體育萌新') : '未註冊';
+}
+function v35IsRookie(){ const r=v35Role(); return r==='未註冊'||r==='體育萌新'; }
+function v35IsNormal(){ return v35Role()==='一般會員'; }
+function v35IsVip(){ const r=v35Role(); return r==='VIP會員'||r==='體育大神'; }
+function v35PaogeMsg(){
+  alert('請立即聯繫砲哥開通您的帳號\nLine：@946sjdhg');
+}
+function v35MemberMsg(){
+  alert('權限不足，請聯繫砲哥加入專屬會員群');
+}
+function openPermissionModal(){ $('permissionModal').classList.remove('hidden'); }
+function closePermissionModal(){ $('permissionModal').classList.add('hidden'); }
+
+/* Time-based fake online count + actual registered count */
+function v35OnlineBase(role,hour){
+  if(role==='體育萌新'){
+    if(hour>=7 && hour<12) return 50;
+    if(hour>=12 && hour<24) return 60;
+    return 20;
+  }
+  if(role==='一般會員'){
+    if(hour>=7 && hour<12) return 10;
+    if(hour>=12 && hour<24) return 50;
+    return 30;
+  }
+  if(role==='VIP會員'){
+    if(hour>=7 && hour<12) return 100;
+    if(hour>=12 && hour<24) return 250;
+    return 80;
+  }
+  if(role==='體育大神'){
+    if(hour>=7 && hour<12) return 8;
+    if(hour>=12 && hour<24) return 18;
+    return 10;
+  }
+  return 0;
+}
+async function v35RefreshTopOnline(){
+  const h=new Date().getHours();
+  let realCounts={'體育萌新':0,'一般會員':0,'VIP會員':0,'體育大神':0};
+  let admin=[];
+  try{
+    const users=await sbFetch('app_users',{query:'?select=account,role,is_online'});
+    (users||[]).forEach(u=>{
+      if(u.is_online && realCounts[u.role]!==undefined) realCounts[u.role]+=1;
+      if(u.account==='paoge5888' && u.is_online) admin.push('<div class="admin-chip">砲哥上線中</div>');
+      if(u.account==='yao88' && u.is_online) admin.push('<div class="admin-chip">龍女上線中</div>');
+    });
+  }catch(e){ console.warn('v35 online users failed',e); }
+  const roles=['體育萌新','一般會員','VIP會員','體育大神'];
+  const meta={
+    '體育萌新':['🌱','bg-slate-900 border border-slate-700 text-slate-300'],
+    '一般會員':['💎','bg-emerald-400/10 border border-emerald-400/20 text-emerald-300'],
+    'VIP會員':['👑','bg-amber-400/10 border border-amber-400/20 text-amber-300'],
+    '體育大神':['🏆','bg-fuchsia-400/10 border border-fuchsia-400/20 text-fuchsia-300']
+  };
+  let total=0;
+  $('levelStats').innerHTML=roles.map(r=>{
+    const num=v35OnlineBase(r,h)+(realCounts[r]||0);
+    total+=num;
+    return `<div class="rounded-full ${meta[r][1]} px-3 py-2">${meta[r][0]} ${r} <span>${num}</span></div>`;
+  }).join('');
+  $('onlineTotal').textContent=String(total);
+  $('adminOnline').innerHTML=admin.join('');
+  const me=v35Me();
+  $('authStatusWrap').innerHTML=me?`<div class="user-chip">${roleEmoji(me.role)} ${me.nickname}</div>`:'';
+  $('logoutBtn').classList.toggle('hidden',!me);
+  const badge=$('dbStatus');
+  if(badge && sbReady()){ badge.classList.remove('off'); badge.textContent='資料庫已連線'; }
+}
+renderAuthUI=function(){ v35RefreshTopOnline(); };
+dbRefreshStatus=async function(){ await v35RefreshTopOnline(); };
+v35RefreshTopOnline();
+setInterval(v35RefreshTopOnline,10*60*1000);
+
+/* Lock clickable areas by permission */
+const v35OldOpenGame=openGame;
+openGame=function(i,tab='data'){
+  if(v35IsRookie()){
+    if(tab==='board'){
+      v35PaogeMsg();
+      return;
+    }
+  }
+  v35OldOpenGame(i,tab);
+  setTimeout(v35ApplyModalLocks,80);
+};
+function v35ApplyModalLocks(){
+  if(v35IsVip()) return;
+  const body=$('modalBody');
+  if(!body) return;
+  if(v35IsRookie()){
+    body.querySelectorAll('section').forEach((sec,idx)=>{
+      if(idx>0) sec.classList.add('lock-card','lock-overlay-click');
+      sec.addEventListener('click',v35PaogeMsg,{once:false});
+    });
+  }
+  if(v35IsNormal()){
+    // Let normal members view data/player comments, but blur spread/total cards and pundit area.
+    body.querySelectorAll('.grid.lg\\:grid-cols-3 > div').forEach((card,idx)=>{
+      if(idx>0){
+        card.classList.add('lock-card','lock-overlay-click');
+        card.addEventListener('click',v35MemberMsg,{once:false});
+      }
+    });
+    const punditBox=document.getElementById('dbPunditComments');
+    if(punditBox){
+      punditBox.innerHTML='<div class="permission-lock-msg">權限不足，請聯繫砲哥加入專屬會員群</div>';
+    }
+  }
+}
+
+/* Homepage game card lock: rookie can only press login/register/contact/permission/logout and see moneyline */
+const v35OldRenderGames=renderGames;
+renderGames=function(){
+  v35OldRenderGames();
+  v35RenderGameLocks();
+};
+function v35RenderGameLocks(){
+  if(v35IsVip()) return;
+  document.querySelectorAll('#games article').forEach(article=>{
+    if(v35IsRookie()){
+      const markets=article.querySelectorAll('.grid.grid-cols-3 > div');
+      markets.forEach((m,idx)=>{ if(idx>0) m.classList.add('lock-card'); });
+      article.querySelectorAll('.action-row button').forEach(btn=>{
+        btn.onclick=function(e){ e.preventDefault(); v35PaogeMsg(); };
+      });
+    }else if(v35IsNormal()){
+      const markets=article.querySelectorAll('.grid.grid-cols-3 > div');
+      markets.forEach((m,idx)=>{ if(idx>0) m.classList.add('lock-card'); });
+    }
+  });
+}
+
+/* Rank detail permissions */
+const v35OldOpenRankDetail=openRankDetail;
+openRankDetail=function(data){
+  if(!v35IsVip()){
+    v35MemberMsg();
+    return;
+  }
+  v35OldOpenRankDetail(data);
+};
+
+/* Hot picks hidden unless VIP */
+const v35OldRenderHotPicks=renderHotPicks;
+renderHotPicks=function(){
+  if(v35IsVip()){
+    v35OldRenderHotPicks();
+  }else{
+    if($('hotPicks')) $('hotPicks').innerHTML='<div class="permission-lock-msg">權限不足，請聯繫砲哥加入專屬會員群</div>';
+  }
+};
+
+/* Prediction center locked except VIP */
+const v35OldOpenPredictionCenter=openPredictionCenter;
+openPredictionCenter=function(){
+  if(!v35IsVip()){
+    v35MemberMsg();
+    return;
+  }
+  v35OldOpenPredictionCenter();
+};
+
+/* Board permissions */
+const v35OldOpenCommentComposer=openCommentComposer;
+openCommentComposer=function(board){
+  if(v35IsRookie()){
+    v35PaogeMsg();
+    return;
+  }
+  if(board.includes('好手') && !v35IsVip()){
+    v35MemberMsg();
+    return;
+  }
+  v35OldOpenCommentComposer(board);
+};
+
+renderGames();
+renderHotPicks();
 </script>
 
 </body>
