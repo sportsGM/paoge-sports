@@ -2464,26 +2464,39 @@ renderAuthUI = function(){ v40RefreshTopOnline(); };
 
 /* Stable DB login/register/logout */
 submitLogin = async function(){
-  const acc=$('loginAccount').value.trim();
-  const pw=$('loginPassword').value.trim();
+  const norm = v => String(v ?? '').trim();
+  const acc = norm($('loginAccount').value);
+  const pw = norm($('loginPassword').value);
+  if(!acc || !pw) return showAuthMsg('請輸入帳號與密碼',false);
   try{
-    const rows=await sbFetch('app_users',{query:`?account=eq.${encodeURIComponent(acc)}&select=*`});
-    const row=rows&&rows[0];
-    if(!row || String(row.password)!==String(pw)){
+    // 先用精準帳號查詢；如果舊資料帳號前後有空格，再退回全表比對 trim(account)。
+    let rows = await sbFetch('app_users',{query:`?account=eq.${encodeURIComponent(acc)}&select=*`});
+    if(!rows || !rows.length){
+      const all = await sbFetch('app_users',{query:'?select=*'});
+      rows = (all || []).filter(u => norm(u.account) === acc);
+    }
+
+    // 如果同帳號曾經被重複建立，不要只拿第一筆；改找密碼真的符合的那一筆。
+    const row = (rows || []).find(u => norm(u.password) === pw);
+    if(!row){
       return showAuthMsg('帳號或密碼錯誤',false);
     }
+
+    const patchQuery = row.id
+      ? `?id=eq.${encodeURIComponent(row.id)}`
+      : `?account=eq.${encodeURIComponent(row.account)}`;
     await sbFetch('app_users',{
       method:'PATCH',
-      query:`?account=eq.${encodeURIComponent(acc)}`,
+      query:patchQuery,
       headers:{Prefer:'return=minimal'},
-      body:{is_online:true,last_seen:new Date().toISOString()}
+      body:{is_online:true,last_seen:new Date().toISOString(),account:acc,password:pw}
     });
     setCurrentUser({
       id:row.id,
-      account:row.account,
-      password:row.password,
-      nickname:row.nickname,
-      lineId:row.line_id,
+      account:acc,
+      password:pw,
+      nickname:row.nickname || acc,
+      lineId:row.line_id || '',
       role:row.role || '體育萌新',
       monthRecommended:row.month_recommended||0,
       monthWins:row.month_wins||0

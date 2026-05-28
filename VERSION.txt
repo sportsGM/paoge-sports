@@ -1,1 +1,2 @@
-v41 - online base counts controlled by Supabase
+paoge / longnv dual site v42 clean release
+只保留正式上線需要的檔案與最新版 SQL。

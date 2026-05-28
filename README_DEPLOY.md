@@ -1,37 +1,37 @@
-# 砲哥 / 龍女雙網站部署包 v19
+# v42 clean release 部署說明
 
-## 已放入
-- `config.js`：前端可公開設定，包含 Supabase Project URL、Publishable key、A/B 網站投注連結。
-- `.env.example`：後端環境變數範例。請勿把真正的 `SUPABASE_SERVICE_ROLE_KEY` 放進 GitHub 或前端。
+這包已經清掉舊版 SQL 與舊 README，避免誤跑舊 SQL 造成資料被覆蓋。
 
-## 重要
-你剛剛提供的 Secret key / service_role key 只能放在後端環境變數，不能放進 `index.html`、`config.js` 或 GitHub Pages。
+## 正式上線需要上傳的檔案
 
-## A/B 網站
-- A：`paoge.sports.com`，我要投注 → `https://money888.mw168.online`
-- B：`yao88.sports.com`，我要投注 → `https://money777.mw168.online`
+- index.html
+- config.js
+- assets/woodfish.png
+- assets/road.png
+- assets/grandma.png
 
-## Supabase
-- Project URL: `https://azubzmuavfstxwzmrjvn.supabase.co`
-- Publishable key 已放入 `config.js`
-- Secret key 請放到後端平台的環境變數，例如 Vercel / Render / Railway / Supabase Edge Functions Secrets
+## Supabase 只需要跑這個
 
+請到 Supabase SQL Editor 執行：
 
-## v38 管理員開通方式
+- SQL_RUN_THIS_ONLY_v42.sql
 
-玩家註冊後，資料會進入 Supabase 的 `app_users` 表。
+這個檔案會：
 
-管理員不用每次跑 SQL，直接到：
+1. 建立 / 補齊目前網站需要的資料表與欄位
+2. 補齊 app_users / comments / predictions / interaction_counts / online_base_settings
+3. 開放目前前端需要的 anon 讀寫權限
+4. 清除 app_users 帳號密碼前後空格
+5. 重設兩個管理員帳號
 
-Supabase → Table Editor → app_users → 找到玩家帳號 → 修改 `role`
+## 預設管理員帳號
 
-角色可填：
+- paoge5888 / 123456
+- yao88 / 123456
 
-- 體育萌新
-- 一般會員
-- VIP會員
-- 體育大神
+如果要改密碼，請先在 SQL_RUN_THIS_ONLY_v42.sql 裡搜尋 123456，改成你要的密碼再執行。
 
-詳細說明請看：
+## 重要提醒
 
-`README_ADMIN_ROLE_EDIT_V38.md`
+這版是前端直接連 Supabase REST API 的簡易營運版，所以 SQL 會 disable RLS 並開放 anon 權限。
+正式大流量營運或涉及真實個資/金流時，建議改成 Supabase Auth + RLS 或後端 API。
