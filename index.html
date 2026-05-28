@@ -138,6 +138,12 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
 .synced-rank-row .name{font-size:.88rem;font-weight:900;color:#e5e7eb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .synced-rank-row .score{font-size:.86rem;font-weight:950;color:#34d399;white-space:nowrap}
 
+
+.simple-rank .synced-rank-line{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:8px;border-radius:12px;background:#020617;border:1px solid rgba(148,163,184,.12);padding:10px 12px}
+.simple-rank .synced-rank-line .rank-no{color:#fbbf24;font-weight:950}
+.simple-rank .synced-rank-line .rank-name{color:#e5e7eb;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.simple-rank .synced-rank-line .rank-score{color:#34d399;font-weight:950;white-space:nowrap}
+
 </style>
 <script src="./config.js"></script>
 </head>
@@ -236,7 +242,7 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
           </div>
           <div class="mini-divider">
             <div class="rank-caption"><div class="mini-title">功德排行榜</div></div>
-            <div class="simple-rank">
+            <div id="woodRankList" class="simple-rank">
               <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">龍女信徒</div><div class="rank-score">356 下</div></div>
               <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">夜盤觀察員</div><div class="rank-score">312 下</div></div>
               <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">林口兄弟</div><div class="rank-score">281 下</div></div>
@@ -261,7 +267,7 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
           <button id="grandmaBtn" onclick="moveGrandma()" class="control-btn mt-3 w-full rounded-xl bg-gradient-to-r from-sky-400 to-emerald-400 text-slate-950 font-black">扶阿嬤過馬路</button>
           <div class="mini-divider">
             <div class="rank-caption"><div class="mini-title">阿嬤排行榜</div></div>
-            <div class="simple-rank">
+            <div id="grandmaRankList" class="simple-rank">
               <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">好心人阿凱</div><div class="rank-score">188 次</div></div>
               <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">水過仙人</div><div class="rank-score">151 次</div></div>
               <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">北區老司機</div><div class="rank-score">129 次</div></div>
@@ -1102,6 +1108,116 @@ moveGrandma = async function(){
 };
 refreshInteractionCounters();
 setInterval(refreshInteractionCounters, 20000);
+</script>
+
+
+<script>
+/* ===== v23 interaction persistence final patch ===== */
+function v23Who(){
+  const me = getCurrentUser && getCurrentUser();
+  return {
+    account: me ? me.account : 'guest_' + (localStorage.getItem('pgai_guest_id') || (()=>{const id='g'+Math.random().toString(36).slice(2,10); localStorage.setItem('pgai_guest_id',id); return id;})()),
+    nickname: me ? me.nickname : '訪客'
+  };
+}
+function v23GroupRows(rows){
+  const map = {};
+  rows.forEach(r=>{
+    const name = r.nickname || r.account || '匿名';
+    if(!map[name]) map[name] = 0;
+    map[name] += Number(r.count || 0);
+  });
+  return Object.entries(map).map(([nickname,count])=>({nickname,count})).sort((a,b)=>b.count-a.count);
+}
+async function v23FetchRows(type){
+  try{
+    return await sbFetch('interaction_counts',{
+      query:`?interaction_type=eq.${encodeURIComponent(type)}&select=nickname,account,count,updated_at&limit=1000`
+    });
+  }catch(e){
+    console.warn('v23 fetch interaction failed', type, e);
+    return [];
+  }
+}
+function v23RenderRank(targetId, grouped, unit){
+  const box = document.getElementById(targetId);
+  if(!box) return;
+  const top = grouped.slice(0,5);
+  if(!top.length){
+    box.innerHTML = `<div class="synced-rank-line"><div class="rank-no">1.</div><div class="rank-name">目前尚無排行</div><div class="rank-score">0 ${unit}</div></div>`;
+    return;
+  }
+  box.innerHTML = top.map((r,idx)=>`
+    <div class="synced-rank-line">
+      <div class="rank-no">${idx+1}.</div>
+      <div class="rank-name">${r.nickname}</div>
+      <div class="rank-score">${r.count} ${unit}</div>
+    </div>
+  `).join('');
+}
+async function v23RefreshInteractions(){
+  if(!sbReady()) return;
+  const woodGrouped = v23GroupRows(await v23FetchRows('woodfish'));
+  const grandmaGrouped = v23GroupRows(await v23FetchRows('grandma'));
+  const woodTotal = woodGrouped.reduce((s,r)=>s+r.count,0);
+  const grandmaTotal = grandmaGrouped.reduce((s,r)=>s+r.count,0);
+  if($('woodCount')) $('woodCount').textContent = String(woodTotal);
+  if($('grandmaCount')) $('grandmaCount').textContent = String(grandmaTotal);
+  v23RenderRank('woodRankList', woodGrouped, '下');
+  v23RenderRank('grandmaRankList', grandmaGrouped, '次');
+}
+async function v23InsertInteraction(type){
+  const who = v23Who();
+  try{
+    await sbFetch('interaction_counts',{
+      method:'POST',
+      headers:{Prefer:'return=minimal'},
+      body:{
+        account:who.account,
+        nickname:who.nickname,
+        interaction_type:type,
+        count:1,
+        updated_at:new Date().toISOString()
+      }
+    });
+  }catch(e){
+    console.warn('v23 insert interaction failed', type, e);
+  }
+  await v23RefreshInteractions();
+}
+
+/* Override click handlers from earlier versions. Keep animations, but persist by insert + sum. */
+knockWood = async function(){
+  const f=$('woodFloat');
+  if(f){ f.classList.remove('play'); void f.offsetWidth; f.classList.add('play'); }
+  await v23InsertInteraction('woodfish');
+};
+
+moveGrandma = async function(){
+  const g=$('grandma'), btn=$('grandmaBtn'), c=$('grandmaCount'), msg=$('grandmaMsg'), bubble=$('grandmaBubble');
+  if(window.pgGrandmaMovingV23) return;
+  window.pgGrandmaMovingV23 = true;
+  btn.disabled=true;
+  btn.classList.add('opacity-70','cursor-not-allowed');
+  window.pgGrandmaRightV23 = !window.pgGrandmaRightV23;
+  g.classList.toggle('right',window.pgGrandmaRightV23);
+  bubble.classList.remove('hidden');
+  bubble.classList.toggle('right',window.pgGrandmaRightV23);
+  const words=Math.random()>.5?'祝你開轟':'謝謝好心人';
+  bubble.textContent=words;
+  msg.textContent=words;
+  btn.textContent=window.pgGrandmaRightV23?'扶她回來':'扶阿嬤過馬路';
+  await v23InsertInteraction('grandma');
+  setTimeout(()=>{
+    window.pgGrandmaMovingV23=false;
+    btn.disabled=false;
+    btn.classList.remove('opacity-70','cursor-not-allowed');
+    setTimeout(()=>bubble.classList.add('hidden'),900);
+  },800);
+};
+
+v23RefreshInteractions();
+setInterval(v23RefreshInteractions, 15000);
 </script>
 
 </body>
