@@ -144,6 +144,19 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
 .pred-cancel-btn:hover{background:rgba(248,113,113,.18)}
 .pred-note.saved{color:#86efac}
 
+
+.synced-rank-line{display:grid;grid-template-columns:34px 1fr auto;align-items:center;gap:8px;border-radius:12px;background:#020617;border:1px solid rgba(148,163,184,.12);padding:10px 12px}
+.synced-rank-line .rank-no{color:#fbbf24;font-weight:950}
+.synced-rank-line .rank-name{color:#e5e7eb;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.synced-rank-line .rank-score{color:#34d399;font-weight:950;white-space:nowrap}
+.hot-pick-empty{border:1px solid rgba(148,163,184,.14);background:#020617;border-radius:12px;padding:12px;color:#94a3b8;font-weight:900;font-size:.88rem}
+.pred-cancel-btn{border:1px solid rgba(248,113,113,.35);background:rgba(248,113,113,.10);color:#fca5a5;border-radius:12px;padding:8px 10px;font-size:.78rem;font-weight:950}
+.pred-note.saved{color:#86efac}
+
+
+.simple-rank{display:grid;gap:8px}
+.simple-rank > .rank-line{display:none !important}
+
 </style>
 <script src="./config.js"></script>
 </head>
@@ -224,12 +237,12 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
 
       <section class="card rounded-3xl p-4">
         <h3 class="font-black text-amber-300 mb-3">今日好手熱推</h3>
-        <div class="space-y-2" id="hotPicks"></div>
+        <div class="space-y-2" id="hotPicks"><div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">熱推載入中...</div></div>
       </section>
 <section class="card rounded-3xl p-4 widget-compact">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-black text-amber-300">功德木魚</h3>
-          <div class="text-xs text-emerald-300 font-black">今日功德 <span id="woodCount">108</span></div>
+          <div class="text-xs text-emerald-300 font-black">今日功德 <span id="woodCount">--</span></div>
         </div>
         <div class="soft rounded-2xl p-3">
           <div class="grid grid-cols-[100px_1fr] gap-3 items-center">
@@ -243,11 +256,7 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
           <div class="mini-divider">
             <div class="rank-caption"><div class="mini-title">功德排行榜</div></div>
             <div id="woodRankList" class="simple-rank">
-              <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">龍女信徒</div><div class="rank-score">356 下</div></div>
-              <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">夜盤觀察員</div><div class="rank-score">312 下</div></div>
-              <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">林口兄弟</div><div class="rank-score">281 下</div></div>
-              <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">水過仙人</div><div class="rank-score">239 下</div></div>
-              <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">北區老司機</div><div class="rank-score">201 下</div></div>
+              <div class="synced-rank-line"><div class="rank-no">...</div><div class="rank-name">排行榜載入中</div><div class="rank-score">-- 下</div></div>
             </div>
           </div>
         </div>
@@ -256,7 +265,7 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
       <section class="card rounded-3xl p-4 widget-compact">
         <div class="flex items-center justify-between mb-2">
           <h3 class="font-black text-amber-300">扶阿嬤過馬路</h3>
-          <div class="text-xs text-emerald-300 font-black">累積次數 <span id="grandmaCount">26</span></div>
+          <div class="text-xs text-emerald-300 font-black">累積次數 <span id="grandmaCount">--</span></div>
         </div>
         <div class="soft rounded-2xl p-3">
           <div class="grandma-scene compact">
@@ -268,11 +277,7 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
           <div class="mini-divider">
             <div class="rank-caption"><div class="mini-title">阿嬤排行榜</div></div>
             <div id="grandmaRankList" class="simple-rank">
-              <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">好心人阿凱</div><div class="rank-score">188 次</div></div>
-              <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">水過仙人</div><div class="rank-score">151 次</div></div>
-              <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">北區老司機</div><div class="rank-score">129 次</div></div>
-              <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">龍女信徒</div><div class="rank-score">118 次</div></div>
-              <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">小分仔</div><div class="rank-score">103 次</div></div>
+              <div class="synced-rank-line"><div class="rank-no">...</div><div class="rank-name">排行榜載入中</div><div class="rank-score">-- 次</div></div>
             </div>
           </div>
         </div>
@@ -370,24 +375,14 @@ body{margin:0;background:radial-gradient(circle at top left,rgba(14,165,233,.12)
       </section>
       <section class="compact-rank-card">
         <div class="honor-head"><div><div class="honor-title">🥁 木魚</div><div class="honor-sub">敲木魚累積次數</div></div><span class="honor-badge">TOP 6</span></div>
-        <div class="simple-rank">
-          <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">龍女信徒</div><div class="rank-score">356 下</div></div>
-          <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">夜盤觀察員</div><div class="rank-score">312 下</div></div>
-          <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">林口兄弟</div><div class="rank-score">281 下</div></div>
-          <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">水過仙人</div><div class="rank-score">239 下</div></div>
-          <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">北區老司機</div><div class="rank-score">201 下</div></div>
-          <div class="rank-line"><div class="rank-no">6.</div><div class="rank-name">VIP小豪</div><div class="rank-score">188 下</div></div>
+        <div id="modalWoodRankList" class="simple-rank">
+          <div class="synced-rank-line"><div class="rank-no">...</div><div class="rank-name">排行榜載入中</div><div class="rank-score">-- 下</div></div>
         </div>
       </section>
       <section class="compact-rank-card">
         <div class="honor-head"><div><div class="honor-title">👵 阿嬤</div><div class="honor-sub">扶阿嬤累積次數</div></div><span class="honor-badge">TOP 6</span></div>
-        <div class="simple-rank">
-          <div class="rank-line"><div class="rank-no">1.</div><div class="rank-name">好心人阿凱</div><div class="rank-score">188 次</div></div>
-          <div class="rank-line"><div class="rank-no">2.</div><div class="rank-name">水過仙人</div><div class="rank-score">151 次</div></div>
-          <div class="rank-line"><div class="rank-no">3.</div><div class="rank-name">北區老司機</div><div class="rank-score">129 次</div></div>
-          <div class="rank-line"><div class="rank-no">4.</div><div class="rank-name">龍女信徒</div><div class="rank-score">118 次</div></div>
-          <div class="rank-line"><div class="rank-no">5.</div><div class="rank-name">小分仔</div><div class="rank-score">103 次</div></div>
-          <div class="rank-line"><div class="rank-no">6.</div><div class="rank-name">南港強</div><div class="rank-score">96 次</div></div>
+        <div id="modalGrandmaRankList" class="simple-rank">
+          <div class="synced-rank-line"><div class="rank-no">...</div><div class="rank-name">排行榜載入中</div><div class="rank-score">-- 次</div></div>
         </div>
       </section>
     </div>
@@ -624,11 +619,18 @@ function pundits(g){
 function playerComments(){ const me=getCurrentUser(); const rows=[[me?me.nickname:'南港強',me?`${roleEmoji(me.role)} ${me.role}`:'👑 VIP會員','這場我先看盤口，不追太深。','14:12'],['小分仔','💎 一般會員','大小分我等臨場再決定。','14:27'],['東區老鐵','🌱 體育萌新','我想跟大分，但會等臨場。','14:39'],['VIP小豪','👑 VIP會員','讓分盤我先觀望，獨贏比較穩。','14:51']]; return `<div class="board-head"><div class="board-title">玩家留言板</div><button class="board-btn" onclick="openCommentComposer('玩家留言板')">我要留言</button></div><div class="comment-list">${rows.slice(0,3).map((r)=>`<article class="comment-card"><div class="top"><div class="name">${r[0]}</div><div class="tag">${r[1]}</div></div><div class="body">${r[2]}</div><div class="time">留言時間｜${r[3]}</div></article>`).join('')}</div><div class="board-pager"><button class="board-page-btn active">第 1 頁</button><button class="board-page-btn" onclick="alert('展示版：第二頁留言會在正式版串接資料庫')">第 2 頁</button></div>`; }
 function openCommentComposer(board){ alert(board+'｜正式版會跳出留言輸入框並寫入資料庫'); }
 
-function renderRank(){ const key=$('rankTab').value,arr=rankData[key]; $('rankPodium').innerHTML=`${podium(arr[1],2,'podium-2')}${podium(arr[0],1,'podium-1')}${podium(arr[2],3,'podium-3')}`; $('rankList').innerHTML=arr.slice(3,10).map((r,idx)=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="flex justify-between items-center gap-3"><button onclick='openRankDetail(${JSON.stringify(r).replace(/'/g,"&#39;")})' class="font-black text-left click-name">${idx+4}. ${r.name}</button><span class="text-emerald-300 font-black">機率 ${r.prob}%</span></div></div>`).join(''); }
+function renderRank(){
+  if($('rankPodium')) $('rankPodium').innerHTML='<div class="text-sm text-slate-500 font-black p-3">預測排行榜載入中...</div>';
+  if($('rankList')) $('rankList').innerHTML='<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">載入中</div>';
+  if(typeof v28RefreshSportsRank==='function') v28RefreshSportsRank();
+}
 function podium(r,num,cls){ return `<div class="podium-col ${cls}"><div class="text-3xl font-black ${num===1?'text-yellow-300':num===2?'text-slate-200':'text-orange-300'}">${num}</div><button onclick='openRankDetail(${JSON.stringify(r).replace(/'/g,"&#39;")})' class="font-black mt-2 click-name">${r.name}</button><div class="text-emerald-300 font-black mt-1">機率 ${r.prob}%</div></div>`; }
 function openRankDetail(data){ const d=typeof data==='string'?JSON.parse(data):data; $('rankModal').classList.remove('hidden'); $('rankModalTitle').textContent=d.name+'｜今日推薦與留言'; $('rankModalBody').innerHTML=`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="text-emerald-300 font-black">參考機率 ${d.prob}%</div><ul class="list-disc pl-5 mt-2 text-sm text-slate-300">${d.picks.map(p=>`<li>${p}</li>`).join('')}</ul></div><div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="font-black text-amber-300">留言</div>${d.comments.map(c=>`<div class="rounded-lg bg-slate-900 border border-slate-800 p-2 text-sm text-slate-300 mt-2">${c}</div>`).join('')}</div>`; }
 function closeRankDetail(){ $('rankModal').classList.add('hidden'); }
-function renderHotPicks(){ $('hotPicks').innerHTML=[["🔥 水過仙人","推 大 8.5 過","78%"],["🔥 林口兄弟","推 老虎 -1.5 過","74%"],["🔥 盤口小王","推 水晶宮勝 過","71%"]].map(x=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="flex justify-between"><b class="text-amber-300">${x[0]}</b><span class="text-emerald-300 font-black">${x[2]}</span></div><div class="text-blue-300 font-black mt-1">${x[1]}</div></div>`).join(''); }
+function renderHotPicks(){
+  if($('hotPicks')) $('hotPicks').innerHTML='<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">熱推載入中...</div>';
+  if(typeof v28RenderHotPicks==='function') v28RenderHotPicks();
+}
 function openAllRanks(){ $('allRankModal').classList.remove('hidden'); }
 function closeAllRanks(){ $('allRankModal').classList.add('hidden'); }
 function openContact(){ $('contactModal').classList.remove('hidden'); }
@@ -1290,6 +1292,235 @@ renderMarketBlock = function(g,market,title,line,choices){
   return `<div class="pred-market"><div class="pred-market-head"><div class="pred-market-title">${title}</div><div class="pred-market-line">${line}</div></div><div class="pred-save-row">${choices.map(c=>predBtn(key,c,market,saved)).join('')}${saved?`<button class="pred-cancel-btn" onclick="cancelPrediction('${key}','${market}')">取消預測</button>`:''}</div><div class="pred-note ${saved?'saved':''}">${saved?`已選：${saved.choice}｜${saved.status||'待結算'}`:'尚未預測'}</div></div>`;
 };
 v27RefreshSportsRank();
+</script>
+
+
+<script>
+/* ===== v28: all player data reads from Supabase; no built-in player names ===== */
+
+/* Sports prediction rank reads app_users + manual_sports_ranks */
+async function v28FetchSportsRankRows(){
+  const rows=[];
+  try{
+    const users=await sbFetch('app_users',{query:'?select=nickname,account,role,month_recommended,month_wins'});
+    (users||[]).forEach(u=>{
+      const rec=Number(u.month_recommended||0), wins=Number(u.month_wins||0);
+      if(rec>0){
+        rows.push({name:u.nickname||u.account||'匿名',rec,wins,rate:Math.round(wins/rec*100),source:'app_users'});
+      }
+    });
+  }catch(e){ console.warn('v28 app_users rank failed',e); }
+  try{
+    const manual=await sbFetch('manual_sports_ranks',{query:'?active=eq.true&select=nickname,month_recommended,month_wins'});
+    (manual||[]).forEach(u=>{
+      const rec=Number(u.month_recommended||0), wins=Number(u.month_wins||0);
+      if(rec>0){
+        rows.push({name:u.nickname||'匿名',rec,wins,rate:Math.round(wins/rec*100),source:'manual'});
+      }
+    });
+  }catch(e){ console.warn('v28 manual_sports_ranks not ready',e); }
+  return rows.sort((a,b)=>b.rate-a.rate || b.wins-a.wins || b.rec-a.rec);
+}
+function v28RankLines(rows, unit){
+  if(!rows.length) return `<div class="synced-rank-line"><div class="rank-no">1.</div><div class="rank-name">目前尚無排行</div><div class="rank-score">--${unit}</div></div>`;
+  return rows.slice(0,6).map((r,i)=>`<div class="synced-rank-line"><div class="rank-no">${i+1}.</div><div class="rank-name">${r.name}</div><div class="rank-score">${r.rate}${unit}</div></div>`).join('');
+}
+function v28SidePodium(rows){
+  if(!rows.length) return `<div class="text-sm text-slate-500 font-black p-3">目前尚無預測排行</div>`;
+  const p=[...rows];
+  while(p.length<3) p.push({name:'待上榜',rate:'--',wins:0,rec:0});
+  const order=[{r:p[1],n:2,cls:'podium-2'},{r:p[0],n:1,cls:'podium-1'},{r:p[2],n:3,cls:'podium-3'}];
+  return order.map(o=>`<div class="podium-col ${o.cls}"><div class="text-3xl font-black ${o.n===1?'text-yellow-300':o.n===2?'text-slate-200':'text-orange-300'}">${o.n}</div><button class="font-black mt-2 click-name" onclick="openRankDetail({name:'${String(o.r.name).replace(/'/g,'&#39;')}',prob:${Number(o.r.rate)||0},picks:['本月 ${o.r.wins||0} 中 / ${o.r.rec||0} 場'],comments:['資料由後台與會員預測統計']})">${o.r.name}</button><div class="text-emerald-300 font-black mt-1">${o.r.rate}%</div></div>`).join('');
+}
+async function v28RefreshSportsRank(){
+  const rows=await v28FetchSportsRankRows();
+  if($('rankPodium')) $('rankPodium').innerHTML=v28SidePodium(rows);
+  if($('rankList')){
+    const rest=rows.slice(3,10);
+    $('rankList').innerHTML=rest.length?rest.map((r,i)=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="flex justify-between items-center gap-3"><button onclick="openRankDetail({name:'${String(r.name).replace(/'/g,'&#39;')}',prob:${Number(r.rate)||0},picks:['本月 ${r.wins} 中 / ${r.rec} 場'],comments:['資料由後台與會員預測統計']})" class="font-black text-left click-name">${i+4}. ${r.name}</button><span class="text-emerald-300 font-black">${r.rate}%</span></div></div>`).join(''):`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">尚無第 4 名之後排行</div>`;
+  }
+  if($('modalSportsRankList')) $('modalSportsRankList').innerHTML=v28RankLines(rows,'%');
+}
+renderRank=function(){
+  if($('rankPodium')) $('rankPodium').innerHTML='<div class="text-sm text-slate-500 font-black p-3">預測排行榜載入中...</div>';
+  if($('rankList')) $('rankList').innerHTML='<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">載入中</div>';
+  v28RefreshSportsRank();
+};
+
+/* Hot picks reads only Supabase hot_picks */
+async function v28RenderHotPicks(){
+  if(!$('hotPicks')) return;
+  try{
+    const rows=await sbFetch('hot_picks',{query:'?active=eq.true&select=nickname,pick,accuracy,comment,sort_order,created_at&order=sort_order.asc,created_at.desc&limit=8'});
+    if(!rows || !rows.length){
+      $('hotPicks').innerHTML='<div class="hot-pick-empty">目前尚無好手熱推，請到 Supabase 的 hot_picks 新增資料。</div>';
+      return;
+    }
+    $('hotPicks').innerHTML=rows.map(x=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3"><div class="flex justify-between gap-2"><b class="text-amber-300">🔥 ${x.nickname||'匿名'}</b><span class="text-emerald-300 font-black">${x.accuracy??'--'}%</span></div><div class="text-blue-300 font-black mt-1">${x.pick||''}</div>${x.comment?`<div class="text-xs text-slate-500 font-black mt-2">${x.comment}</div>`:''}</div>`).join('');
+  }catch(e){
+    console.warn('v28 hot_picks failed',e);
+    $('hotPicks').innerHTML='<div class="hot-pick-empty">hot_picks 尚未建立或權限未開，請執行 v28 SQL。</div>';
+  }
+}
+renderHotPicks=function(){
+  $('hotPicks').innerHTML='<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 text-slate-500 font-black">熱推載入中...</div>';
+  v28RenderHotPicks();
+};
+
+/* Rank overview refresh: sports + wood/grandma from DB */
+const v28OldOpenAllRanks=openAllRanks;
+openAllRanks=function(){
+  v28OldOpenAllRanks();
+  v28RefreshSportsRank();
+  if(typeof v26RefreshRankOverview==='function') v26RefreshRankOverview();
+  if(typeof v24RefreshInteractions==='function') v24RefreshInteractions();
+};
+
+/* Prediction cancellation */
+async function v28LoadDbPredictions(){
+  const me=getCurrentUser&&getCurrentUser();
+  if(!me||!sbReady()) return;
+  try{
+    const rows=await sbFetch('predictions',{query:`?account=eq.${encodeURIComponent(me.account)}&select=game_key,market_type,pick,result,created_at&order=created_at.desc&limit=500`});
+    const p={};
+    (rows||[]).forEach(r=>{ if(!p[r.game_key]) p[r.game_key]={choice:r.pick,market:r.market_type,at:r.created_at,status:r.result||'pending'}; });
+    savePreds(p);
+  }catch(e){ console.warn('v28 load preds failed',e); }
+}
+openPredictionCenter=async function(){ await v28LoadDbPredictions(); renderPredictionCenter(); $('predictionModal').classList.remove('hidden'); };
+cancelPrediction=async function(key,market){
+  const me=getCurrentUser&&getCurrentUser();
+  const p=loadPreds(); delete p[key]; savePreds(p);
+  if(me&&sbReady()){
+    try{ await sbFetch('predictions',{method:'DELETE',query:`?account=eq.${encodeURIComponent(me.account)}&game_key=eq.${encodeURIComponent(key)}&market_type=eq.${encodeURIComponent(market||'')}`,headers:{Prefer:'return=minimal'}}); }
+    catch(e){ console.warn('cancel prediction failed',e); }
+  }
+  renderPredictionCenter();
+};
+savePrediction=async function(key,choice,market){
+  const me=getCurrentUser&&getCurrentUser();
+  if(!me){ alert('請先登入後再預測'); openAuthModal('login'); return; }
+  const p=loadPreds(); p[key]={choice,market,at:new Date().toLocaleString('zh-TW'),status:'待結算'}; savePreds(p);
+  if(sbReady()){
+    try{
+      await sbFetch('predictions',{method:'DELETE',query:`?account=eq.${encodeURIComponent(me.account)}&game_key=eq.${encodeURIComponent(key)}&market_type=eq.${encodeURIComponent(market||'')}`,headers:{Prefer:'return=minimal'}});
+      await sbFetch('predictions',{method:'POST',headers:{Prefer:'return=minimal'},body:{game_key:key,account:me.account,nickname:me.nickname,market_type:market||'total',pick:choice,line_text:choice,result:'pending',created_at:new Date().toISOString()}});
+    }catch(e){ console.warn('save prediction failed',e); }
+  }
+  renderPredictionCenter();
+};
+predBtn=function(key,choice,market,saved){
+  const safe=String(choice).replace(/'/g,"&#39;");
+  const active=saved&&saved.choice===choice;
+  return `<button class="pred-btn ${active?'active':''}" onclick="savePrediction('${key}','${safe}','${market}')">${choice}</button>`;
+};
+renderMarketBlock=function(g,market,title,line,choices){
+  const key=predKey(g,market), saved=loadPreds()[key];
+  return `<div class="pred-market"><div class="pred-market-head"><div class="pred-market-title">${title}</div><div class="pred-market-line">${line}</div></div><div class="pred-save-row">${choices.map(c=>predBtn(key,c,market,saved)).join('')}${saved?`<button class="pred-cancel-btn" onclick="cancelPrediction('${key}','${market}')">取消預測</button>`:''}</div><div class="pred-note ${saved?'saved':''}">${saved?`已選：${saved.choice}｜${saved.status||'待結算'}`:'尚未預測'}</div></div>`;
+};
+
+v28RefreshSportsRank();
+v28RenderHotPicks();
+</script>
+
+
+<script>
+/* ===== v30: online count controlled by Supabase + auto changes every 10 minutes ===== */
+const ONLINE_ROLES = ['體育萌新','一般會員','VIP會員','體育大神'];
+const ONLINE_DEFAULTS = {
+  '體育萌新': {min:100, max:180, emoji:'🌱', cls:'bg-slate-900 border border-slate-700 text-slate-300'},
+  '一般會員': {min:200, max:280, emoji:'💎', cls:'bg-emerald-400/10 border border-emerald-400/20 text-emerald-300'},
+  'VIP會員': {min:300, max:380, emoji:'👑', cls:'bg-amber-400/10 border border-amber-400/20 text-amber-300'},
+  '體育大神': {min:20, max:45, emoji:'🏆', cls:'bg-fuchsia-400/10 border border-fuchsia-400/20 text-fuchsia-300'}
+};
+function v30Rand(min,max){ return Math.floor(Math.random()*(Number(max)-Number(min)+1))+Number(min); }
+function v30NeedsRefresh(ts){
+  if(!ts) return true;
+  return (Date.now() - new Date(ts).getTime()) >= 10*60*1000;
+}
+function v30RenderOnlineRows(rows){
+  const byRole = {};
+  (rows||[]).forEach(r=>byRole[r.role]=r);
+  let total = 0;
+  const html = ONLINE_ROLES.map(role=>{
+    const d=ONLINE_DEFAULTS[role];
+    const r=byRole[role] || {};
+    const num=Number(r.current_count ?? d.min);
+    total += num;
+    return `<div class="rounded-full ${d.cls} px-3 py-2">${d.emoji} ${role} <span>${num}</span></div>`;
+  }).join('');
+  if($('levelStats')) $('levelStats').innerHTML = html;
+  if($('onlineTotal')) $('onlineTotal').textContent = String(total);
+}
+async function v30LoadAndMaybeUpdateOnlineStats(){
+  if(!sbReady()){
+    v30RenderOnlineRows(ONLINE_ROLES.map(role=>({role,current_count:ONLINE_DEFAULTS[role].min})));
+    return [];
+  }
+  try{
+    let rows = await sbFetch('online_stats',{query:'?select=role,min_count,max_count,current_count,last_generated_at&active=eq.true'});
+    if(!rows || !rows.length){
+      rows = ONLINE_ROLES.map(role=>({
+        role,
+        min_count:ONLINE_DEFAULTS[role].min,
+        max_count:ONLINE_DEFAULTS[role].max,
+        current_count:ONLINE_DEFAULTS[role].min,
+        last_generated_at:null
+      }));
+    }
+    const updated = [];
+    for(const r of rows){
+      const role = r.role;
+      if(!ONLINE_DEFAULTS[role]) continue;
+      const min = Number(r.min_count ?? ONLINE_DEFAULTS[role].min);
+      const max = Number(r.max_count ?? ONLINE_DEFAULTS[role].max);
+      let current = Number(r.current_count ?? min);
+      if(v30NeedsRefresh(r.last_generated_at)){
+        current = v30Rand(min,max);
+        try{
+          await sbFetch('online_stats',{
+            method:'PATCH',
+            query:`?role=eq.${encodeURIComponent(role)}`,
+            headers:{Prefer:'return=minimal'},
+            body:{current_count:current,last_generated_at:new Date().toISOString()}
+          });
+        }catch(e){
+          console.warn('v30 online_stats patch failed', role, e);
+        }
+      }
+      updated.push({...r,current_count:current});
+    }
+    v30RenderOnlineRows(updated);
+    return updated;
+  }catch(e){
+    console.warn('v30 online_stats load failed', e);
+    v30RenderOnlineRows(ONLINE_ROLES.map(role=>({role,current_count:ONLINE_DEFAULTS[role].min})));
+    return [];
+  }
+}
+async function v30RefreshAdminOnlineOnly(){
+  try{
+    const users = await sbFetch('app_users',{query:'?select=account,nickname,is_online'});
+    const admin=[];
+    if((users||[]).find(u=>u.account==='paoge5888' && u.is_online)) admin.push('<div class="admin-chip">砲哥上線中</div>');
+    if((users||[]).find(u=>u.account==='yao88' && u.is_online)) admin.push('<div class="admin-chip">龍女上線中</div>');
+    if($('adminOnline')) $('adminOnline').innerHTML=admin.join('');
+  }catch(e){ console.warn('v30 admin online failed', e); }
+}
+async function v30RefreshTopOnline(){
+  await v30LoadAndMaybeUpdateOnlineStats();
+  await v30RefreshAdminOnlineOnly();
+  const me = getCurrentUser && getCurrentUser();
+  if($('authStatusWrap')) $('authStatusWrap').innerHTML = me ? `<div class="user-chip">${roleEmoji(me.role)} ${me.nickname}</div>` : '';
+  if($('logoutBtn')) $('logoutBtn').classList.toggle('hidden',!me);
+  const badge=$('dbStatus');
+  if(badge && sbReady()){ badge.classList.remove('off'); badge.textContent='資料庫已連線'; }
+}
+/* Override older top-right refresh functions so static frontend counts do not control it anymore. */
+renderAuthUI = function(){ v30RefreshTopOnline(); };
+dbRefreshStatus = async function(){ await v30RefreshTopOnline(); };
+v30RefreshTopOnline();
+setInterval(v30RefreshTopOnline, 10*60*1000);
 </script>
 
 </body>
