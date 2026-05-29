@@ -298,7 +298,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v71-clean-reset', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      parser_version: 'v72-clean-reset-delete-before-insert', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
       display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'),
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -589,7 +589,7 @@ async function writeRawSportsData(rows) {
     const run = await supabaseRequest('raw_sports_sync_runs', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([{ source: 'github_actions', version: 'v71-clean-reset', status: 'success', total_games: rows.length, created_at: nowISO() }])
+      body: JSON.stringify([{ source: 'github_actions', version: 'v72-clean-reset-delete-before-insert', status: 'success', total_games: rows.length, created_at: nowISO() }])
     });
     runId = Array.isArray(run) && run[0] ? run[0].id : null;
   } catch (e) { console.warn('raw_sports_sync_runs not written:', e.message); }
@@ -633,29 +633,27 @@ function dedupeGames(rows) {
   return out;
 }
 async function upsertDailyGames(rows) {
-  // v71 clean reset：不再依賴 Supabase unique constraint / ON CONFLICT。
-  // 每次同步先把今日/明日/昨日三個顯示池關掉，再直接寫入本次抓到的乾淨資料。
+  // v72 clean reset：每次同步先刪除今日/明日/昨日顯示池，再寫入本次乾淨資料，避免 Supabase unique key 重複。
   const cleanRows = dedupeGames(rows).map(stripDailyRow);
   try { await writeRawSportsData(cleanRows); } catch(e) { console.warn('raw data center skipped:', e.message); }
   await supabaseRequest(`daily_games?game_day_type=in.(today,tomorrow,yesterday)`, {
-    method: 'PATCH',
-    headers: { Prefer: 'return=minimal' },
-    body: JSON.stringify({ active: false, updated_at: nowISO() })
-  }).catch(e=>console.warn('deactivate old display rows failed:', e.message));
-  if (!cleanRows.length) { await writeSyncStatus('empty', 'v71 parsed 0 valid games', 0); return; }
+    method: 'DELETE',
+    headers: { Prefer: 'return=minimal' }
+  }).catch(e=>console.warn('delete old display rows failed:', e.message));
+  if (!cleanRows.length) { await writeSyncStatus('empty', 'v72 parsed 0 valid games', 0); return; }
   await supabaseRequest('daily_games', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify(cleanRows)
   });
-  await writeSyncStatus('success', `v71 synced ${cleanRows.length} valid games`, cleanRows.length);
+  await writeSyncStatus('success', `v72 synced ${cleanRows.length} valid games`, cleanRows.length);
 }
 
 async function main() {
   await waitUntilTaipeiDateReady();
   console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}), tomorrow=${dateTW(1)} (${mdTW(1)})`);
   const games = await scrapePlaySportWithBrowser();
-  console.log(`Parsed valid games v71 clean: ${games.length}`);
+  console.log(`Parsed valid games v72 clean: ${games.length}`);
   console.log(games.slice(0, 60).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   await upsertDailyGames(games);
   console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid upcoming games parsed for today/tomorrow.');
