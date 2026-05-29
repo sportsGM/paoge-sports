@@ -1,4 +1,4 @@
-name: Daily 2AM sports sync v83 search
+name: Daily 2AM sports sync v88 CPBL official AI
 
 on:
   schedule:
@@ -31,3 +31,6 @@ jobs:
           SEARCH_PROVIDER: ${{ secrets.SEARCH_PROVIDER }}
           SEARCH_API_KEY: ${{ secrets.SEARCH_API_KEY }}
           GOOGLE_CSE_ID: ${{ secrets.GOOGLE_CSE_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          API_SPORTS_KEY: ${{ secrets.API_SPORTS_KEY }}
