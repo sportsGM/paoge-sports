@@ -9,7 +9,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABA
 const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'off').toLowerCase();
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
 const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID || '';
-// v97: 今日/明日賽事雙池；Google/Search API 備援關閉；Yahoo 詳細補資料只跑 MLB / CPBL。
+// v109: MLB Yahoo 單場配對改用日期+隊名+開賽時間評分；避免系列賽抓錯，抓不到先發則顯示先發尚未公布。
 const SEARCH_FALLBACK_ENABLED = String(process.env.SEARCH_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
 const SEARCH_ENRICH_LIMIT = Number(process.env.SEARCH_ENRICH_LIMIT || 0);
 const SEARCH_RESULTS_PER_QUERY = Number(process.env.SEARCH_RESULTS_PER_QUERY || 5);
@@ -827,20 +827,22 @@ function enrichGameFromTexts(game, battleText, teamTexts){
 }
 
 function yahooDateForLeagueKey(key){
-  // Yahoo 運動 scoreboard 日期：CPBL 使用台灣今天；MLB 因美國時差使用台灣日期 +1。
+  // CPBL 依台灣日期；MLB 資料常以美國/台灣跨日呈現，會用多日期備援，但不是每場都 Google。
   if(key === 'MLB') return dateTW(1);
   return dateTW(0);
 }
+function yahooDateCandidatesForLeagueKey(key){
+  if(key === 'MLB'){
+    // 系列賽同隊可能連打三天；載入今天、明天、後天 scoreboard，後續用隊名+時間評分選正確單場。
+    return [...new Set([dateTW(0), dateTW(1), dateTW(2)])];
+  }
+  return [yahooDateForLeagueKey(key)];
+}
 function yahooScoreboardUrls(key){
-  const d = yahooDateForLeagueKey(key);
-  const urls = {
-    MLB: [`https://tw.sports.yahoo.com/mlb/scoreboard/?date=${d}`],
-    NBA: [`https://tw.sports.yahoo.com/nba/scoreboard/?date=${d}`],
-    WNBA: [`https://tw.sports.yahoo.com/wnba/scoreboard/?date=${d}`],
-    football: [`https://tw.sports.yahoo.com/soccer/scoreboard/?date=${d}`],
-    CPBL: [`https://tw.sports.yahoo.com/cpbl/scoreboard/?date=${d}`]
-  };
-  return urls[key] || [];
+  const ds = yahooDateCandidatesForLeagueKey(key);
+  const path = { MLB:'mlb', NBA:'nba', WNBA:'wnba', football:'soccer', CPBL:'cpbl' }[key];
+  if(!path) return [];
+  return ds.map(d=>`https://tw.sports.yahoo.com/${path}/scoreboard/?date=${d}`);
 }
 function yahooLeagueKey(game){
   if(game.league === 'MLB') return 'MLB';
@@ -889,6 +891,74 @@ function textContainsTeam(text, team){
   const raw=String(text||'').toLowerCase();
   return teamTokens(team).some(tok=>raw.includes(tok.toLowerCase()));
 }
+function timeToMinutes(t=''){
+  const m=String(t||'').match(/(AM|PM)?\s*(\d{1,2}):(\d{2})/i);
+  if(!m) return null;
+  let h=Number(m[2]), min=Number(m[3]);
+  const ap=(m[1]||'').toUpperCase();
+  if(ap==='PM' && h<12) h+=12;
+  if(ap==='AM' && h===12) h=0;
+  return h*60+min;
+}
+function circularMinuteDiff(a,b){
+  if(a==null || b==null) return null;
+  const d=Math.abs(a-b);
+  return Math.min(d, 1440-d);
+}
+function extractYahooTimes(text=''){
+  const raw=String(text||'');
+  const out=[];
+  const patterns=[/(?:上午|AM)\s*(\d{1,2}):(\d{2})/ig,/(?:下午|PM)\s*(\d{1,2}):(\d{2})/ig,/(AM|PM)\s*(\d{1,2}):(\d{2})/ig];
+  for(const re of patterns){
+    let m;
+    while((m=re.exec(raw))){
+      let token=m[0].replace('上午','AM').replace('下午','PM');
+      out.push(timeToMinutes(token));
+    }
+  }
+  return out.filter(x=>x!=null);
+}
+function yahooTimeScore(game, text=''){
+  const gm=timeToMinutes(game.game_time||'');
+  const times=extractYahooTimes(text);
+  if(gm==null || !times.length) return {score:0, diff:null};
+  const diff=Math.min(...times.map(t=>circularMinuteDiff(gm,t)).filter(x=>x!=null));
+  if(diff<=30) return {score:30, diff};
+  if(diff<=90) return {score:18, diff};
+  if(diff<=150) return {score:8, diff};
+  return {score:-25, diff};
+}
+function yahooMatchScore(game, text=''){
+  const aj=game.analysis_json||{};
+  const away=aj.true_away || game.home;
+  const home=aj.true_home || game.away;
+  let score=0;
+  if(textContainsTeam(text,away)) score+=35;
+  if(textContainsTeam(text,home)) score+=35;
+  if(score<70) return {score, diff:null, teams:false};
+  const ts=yahooTimeScore(game,text);
+  score+=ts.score;
+  return {score, diff:ts.diff, teams:true};
+}
+function hasMeaningfulPitcherData(game){
+  const aj=game.analysis_json||{};
+  if(!Array.isArray(aj.starters)) return false;
+  return aj.starters.some(st => Array.isArray(st.stats) && st.stats.some(([k,v]) => {
+    const key=String(k||''); const val=String(v||'').trim();
+    return /ERA|WHIP|勝投|敗投|防禦率/.test(key) && val && !/待更新|未公布|尚未/.test(val);
+  }));
+}
+function markStartersPendingIfEmpty(game){
+  const aj=game.analysis_json||{};
+  if(!Array.isArray(aj.starters) || hasMeaningfulPitcherData(game)) return;
+  aj.starters=aj.starters.map(s=>({
+    ...s,
+    name: (s.name && !/待更新/.test(s.name)) ? s.name : '先發尚未公布',
+    stats: [['狀態','先發尚未公布']]
+  }));
+  aj.detail_status = aj.detail_status || 'pitchers_pending';
+  game.analysis_json=aj;
+}
 async function fetchYahooScoreboard(context, key){
   const urls=yahooScoreboardUrls(key);
   if(!urls.length) return {url:'', text:'', links:[]};
@@ -928,27 +998,19 @@ async function buildYahooScoreboardCache(context, games){
   return cache;
 }
 function yahooCandidateLinksFromScoreboard(game, board){
-  const aj=game.analysis_json||{};
-  const away=aj.true_away || game.home;
-  const home=aj.true_home || game.away;
   const all=(board?.links||[]).filter(a=>a.href && /tw\.sports\.yahoo\.com/.test(a.href));
-  const direct=all.filter(a=>{
-    const hay=`${a.text} ${decodeURIComponent(a.href||'')}`;
-    return textContainsTeam(hay,away) && textContainsTeam(hay,home);
-  });
-  const sameLeague=all.filter(a=>{
+  const scored=[];
+  for(const a of all){
     const h=a.href||'';
-    if(/scoreboard|standings|teams|players|news|video|fantasy|betting/i.test(h)) return false;
-    if(game.league==='MLB') return /\/mlb\//i.test(h);
-    if(game.league==='CPBL') return /\/cpbl\//i.test(h);
-    if(game.league==='NBA') return /\/nba\//i.test(h);
-    if(game.league==='WNBA') return /\/wnba\//i.test(h);
-    return /\/soccer\//i.test(h);
-  });
-  // 先精準雙隊名，其次同聯盟候選頁。後面 fetch 後仍會檢查是否真的包含雙隊，避免塞錯。
-  const merged=[...direct, ...sameLeague];
+    if(/scoreboard|standings|teams|players|news|video|fantasy|betting/i.test(h)) continue;
+    if(game.league==='MLB' && !/\/mlb\//i.test(h)) continue;
+    if(game.league==='CPBL' && !/\/cpbl\//i.test(h)) continue;
+    const hay=`${a.text||''} ${decodeURIComponent(h)}`;
+    const ms=yahooMatchScore(game, hay);
+    if(ms.score>=45) scored.push({href:h, score:ms.score, text:a.text||''});
+  }
   const seen=new Set();
-  return merged.filter(x=>!seen.has(x.href)&&seen.add(x.href)).slice(0,3).map(x=>x.href);
+  return scored.sort((a,b)=>b.score-a.score).filter(x=>!seen.has(x.href)&&seen.add(x.href)).slice(0,5).map(x=>x.href);
 }
 function parseYahooPitcherStatsFromBlock(allText, pitcherName){
   const raw=String(allText||'').replace(/\s+/g,' ');
@@ -1218,8 +1280,9 @@ async function enrichGamesWithApiLayer(games) {
   let officialHits = 0, aiHits = 0;
   for (const game of games) {
     if (await enrichMLBOfficialStats(game)) officialHits++;
+    markStartersPendingIfEmpty(game);
     if (await openAiSummarizeGame(game)) aiHits++;
-    await new Promise(r=>setTimeout(r,150));
+    await new Promise(r=>setTimeout(r,120));
   }
   console.log(`Individual API layer done. officialApiHits=${officialHits}, openAiAnalyses=${aiHits}. ${OPENAI_API_KEY ? 'OPENAI_API_KEY found' : 'OPENAI_API_KEY not set, using rule-based analysis only.'}`);
 }
@@ -1253,12 +1316,16 @@ async function enrichGamesWithDetails(context, games){
     const yahooLinks = yahooCandidateLinksFromScoreboard(game, board);
     for(const url of yahooLinks){
       const text = await safePageText(context, url);
-      const aj=game.analysis_json||{};
-      const away=aj.true_away || game.home;
-      const home=aj.true_home || game.away;
-      if(text && textContainsTeam(text, away) && textContainsTeam(text, home)) detailPages.push({url, text});
-      await new Promise(r=>setTimeout(r,250));
+      if(text){
+        const ms=yahooMatchScore(game, text);
+        // MLB 系列賽同隊可能連打多天，必須隊名符合且時間不能差太遠；若頁面沒有時間，允許但分數要足夠。
+        const timeOk = ms.diff == null || ms.diff <= 150;
+        if(ms.teams && ms.score >= 60 && timeOk) detailPages.push({url, text, matchScore:ms.score, timeDiff:ms.diff});
+      }
+      await new Promise(r=>setTimeout(r,180));
     }
+    detailPages.sort((a,b)=>(b.matchScore||0)-(a.matchScore||0));
+    detailPages=detailPages.slice(0,1);
 
     // 如果 Yahoo scoreboard 沒找到單場頁，才使用 Google 搜尋備援。
     if (!detailPages.length && SEARCH_FALLBACK_ENABLED && i < limit && SEARCH_API_KEY) {

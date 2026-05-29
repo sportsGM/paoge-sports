@@ -825,7 +825,7 @@ function buildGameData(g){
   const base=data[g.sport]||data.baseball;
   const aj=g.analysis_json||{};
   const copy=JSON.parse(JSON.stringify(base));
-  const cleanStats=(arr,fallback)=>Array.isArray(arr)&&arr.length?arr.filter(s=>!['來源','數據來源','資料來源','狀態','補強'].includes(String(s[0]||''))).map(s=>[s[0],String(s[1]||'待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'').trim()||'待更新']):fallback;
+  const cleanStats=(arr,fallback)=>{ const rows=Array.isArray(arr)&&arr.length?arr.filter(s=>!['來源','數據來源','資料來源','補強'].includes(String(s[0]||''))).map(s=>[s[0],String(s[1]||'待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'').trim()||'待更新']):fallback; const meaningful=rows.some(r=>{const v=String(r[1]||'').trim(); return v && !/待更新|資料整理中|未公布/.test(v);}); return meaningful?rows:[['狀態','先發尚未公布']]; };
   if(Array.isArray(aj.starters) && aj.starters.length){
     copy.topTitle='雙方先發';
     copy.top=aj.starters.map(x=>({team:x.team||'',name:x.name||'先發待公布',role:x.role||'先發',stats:cleanStats(x.stats,[["ERA","待更新"],["WHIP","待更新"],["勝投","待更新"],["敗投","待更新"],["近況","待更新"]])}));
