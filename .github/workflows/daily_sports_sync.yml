@@ -1,4 +1,4 @@
-name: Sports sync v105 incremental + daily full
+name: Sports sync v108 bettable finished filter
 
 on:
   schedule:
