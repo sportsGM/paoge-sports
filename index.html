@@ -551,7 +551,7 @@ body:not(.vip-user) #modalBody section.grid > div:nth-child(n+2)::after{
 </div>
 
 <script>
-const leagues={baseball:[["MLB","MLB"],["CPBL","中華職棒"],["NPB","日本職棒"]],basketball:[["NBA","NBA"],["WNBA","WNBA"]],football:[["ECL","歐協杯"],["EPL","英超"],["INT","國際賽"]]};
+const leagues={baseball:[["MLB","MLB"],["NPB","日本職棒"],["CPBL","中華職棒"],["KBO","韓國職棒"]],basketball:[["NBA","NBA"],["WNBA","WNBA"],["CBA","中國職籃"]],football:[["足球","足球"]]};
 const games={
 MLB:[
 {time:"AM 07:40",away:"天使",home:"老虎",money:"老虎勝 ★",spread:"老虎 -1.5",total:"大 8.5 ★",sport:"baseball",conf:[72,62,58]},
@@ -718,12 +718,29 @@ function renderGames(){
 function marketMini(label,val,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-xl border ${cls} p-2"><div class="text-[11px] font-black">${label}</div><div class="market mt-1">${val}</div></div>`; }
 
 function closeGame(){ $('gameModal').classList.add('hidden'); document.body.classList.remove('modal-open'); }
+function buildGameData(g){
+  const base=data[g.sport]||data.baseball;
+  const aj=g.analysis_json||{};
+  const copy=JSON.parse(JSON.stringify(base));
+  if(Array.isArray(aj.starters) && aj.starters.length){
+    copy.topTitle='雙方先發';
+    copy.top=aj.starters.map(x=>({team:x.team||'',name:x.name||'先發待公布',role:x.role||'先發',stats:Array.isArray(x.stats)?x.stats:[["來源","玩運彩"],["狀態",x.name&&x.name!=='先發待公布'?"已公布":"待公布"]]}));
+  }
+  if(Array.isArray(aj.core_players) && aj.core_players.length){
+    copy.topTitle='核心隊員';
+    const players=aj.core_players.map(x=>({team:x.team||'',name:x.name||'核心隊員待同步',role:x.role||'隊伍資料',award:x.award||'資料來源同步中'}));
+    if(g.sport==='football') copy.top=[...players,...players].slice(0,6);
+    else copy.top=players.map(x=>({...x,stats:[["來源","玩運彩"],["補強","Yahoo/SofaScore"]]}));
+  }
+  return copy;
+}
+function gameDisplayTitle(g){ return `${g.away} vs ${g.home}`; }
 function openGame(i,tab='data'){
   currentGameIndex=i;
-  const g=(games[state.league]||games.MLB)[i], d=data[g.sport];
+  const g=(games[state.league]||games.MLB)[i], d=buildGameData(g);
   $('gameModal').classList.remove('hidden'); document.body.classList.add('modal-open');
   $('modalLeague').textContent=`${state.league}｜${g.time}`;
-  $('modalTitle').textContent=`${g.away} vs ${g.home}`;
+  $('modalTitle').textContent=gameDisplayTitle(g);
   const dataHtml=`${summaryCards(g)}${section(d.topTitle,topBlock(d.top,g.sport))}${section('傷員狀況',injuries(d.injuries,g.sport))}${section('雙方對比',comparison(d.metrics,g.away,g.home))}${section('雙方歷史對戰',h2h(d.h2h))}${section('雙方近期賽況',recent(d.recent))}`;
   const boardHtml=`${section('',pundits(g))}${section('',playerComments())}`;
   $('modalBody').innerHTML=`<div class="comment-tabs"><button class="comment-tab ${tab==='data'?'active':''}" onclick="openGame(${i},'data')">查看數據</button><button class="comment-tab ${tab==='board'?'active':''}" onclick="openGame(${i},'board')">留言板</button></div>${tab==='data'?dataHtml:boardHtml}`;
@@ -2863,9 +2880,9 @@ async function v52LoadDailyGames(){
       grouped[league].push(v52NormalizeDailyGame(r));
     });
     Object.keys(grouped).forEach(k=>{ games[k]=grouped[k]; });
-    const availableBaseball=[['MLB','MLB'],['CPBL','中華職棒'],['NPB','日本職棒']].filter(x=>games[x[0]]?.length);
-    const availableBasketball=[['NBA','NBA'],['WNBA','WNBA']].filter(x=>games[x[0]]?.length);
-    const availableFootball=[['ECL','歐協杯'],['EPL','英超'],['INT','國際賽']].filter(x=>games[x[0]]?.length);
+    const availableBaseball=[['MLB','MLB'],['NPB','日本職棒'],['CPBL','中華職棒'],['KBO','韓國職棒']].filter(x=>games[x[0]]?.length);
+    const availableBasketball=[['NBA','NBA'],['WNBA','WNBA'],['CBA','中國職籃']].filter(x=>games[x[0]]?.length);
+    const availableFootball=[['足球','足球'],['ECL','歐協杯'],['EPL','英超'],['INT','國際賽']].filter(x=>games[x[0]]?.length);
     if(availableBaseball.length) leagues.baseball=availableBaseball;
     if(availableBasketball.length) leagues.basketball=availableBasketball;
     if(availableFootball.length) leagues.football=availableFootball;
@@ -2876,7 +2893,7 @@ async function v52LoadDailyGames(){
     renderLeagues();
     renderGames();
     const badge=document.querySelector('#gamesBlock .text-emerald-300');
-    if(badge) badge.textContent='資料同步中';
+    if(badge) badge.textContent='資料已同步';
   }catch(e){
     console.warn('v52 daily_games load failed', e);
   }
