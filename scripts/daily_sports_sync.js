@@ -161,8 +161,8 @@ function convertGroupToGame(group, target, sourceUrl) {
     : target.league;
 
   const starters = target.sport === 'baseball' ? [
-    { team: homeTeam, name: homeDetail || '先發待公布', role: '主隊先發', stats: [['數據來源', 'Yahoo奇摩運動待同步'], ['ERA', '待更新'], ['WHIP', '待更新'], ['近況', '待更新']] },
-    { team: awayTeam, name: awayDetail || '先發待公布', role: '客隊先發', stats: [['數據來源', 'Yahoo奇摩運動待同步'], ['ERA', '待更新'], ['WHIP', '待更新'], ['近況', '待更新']] }
+    { team: homeTeam, name: homeDetail || '先發待公布', role: '主隊先發', stats: [['ERA', '待更新'], ['WHIP', '待更新'], ['勝投', '待更新'], ['敗投', '待更新'], ['近況', '待更新']] },
+    { team: awayTeam, name: awayDetail || '先發待公布', role: '客隊先發', stats: [['ERA', '待更新'], ['WHIP', '待更新'], ['勝投', '待更新'], ['敗投', '待更新'], ['近況', '待更新']] }
   ] : [];
   const corePlayers = target.sport !== 'baseball' ? [
     { team: homeTeam, name: '核心隊員待同步', role: '主隊', award: '依 Yahoo / SofaScore 後續補強近期狀態、傷兵與主客場數據。' },
@@ -176,12 +176,12 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '玩運彩', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v57-playsport-structured-parser', true_away: awayTeam, true_home: homeTeam,
+      parser_version: 'v58-pitcher-stats-layout', true_away: awayTeam, true_home: homeTeam,
       display_order: 'home_first', competition, sport_label: target.label,
       starters, core_players: corePlayers,
       odds_hidden: true,
       odds: { spread_away: spreadAway, spread_home: spreadHome, money_away: moneyAway, money_home: moneyHome, money_draw: moneyDraw, total_over: totalOver, total_under: totalUnder },
-      source_note: 'v57 依玩運彩表格 class 解析：非足球只取右側運彩盤；賠率僅做內部信心值，不顯示在前台；足球不讓分視為獨贏。',
+      source_note: 'v58 依玩運彩表格 class 解析：非足球只取右側運彩盤；賠率僅做內部信心值，不顯示在前台；足球不讓分視為獨贏。',
       data_sources: target.sport === 'football' ? ['玩運彩預測賽事', '台灣運彩盤口', 'SofaScore'] : ['玩運彩預測賽事', 'Yahoo奇摩運動']
     }
   };
