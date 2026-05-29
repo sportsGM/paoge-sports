@@ -42,8 +42,11 @@ function isBadTeamName(s = '') {
   const t = cleanTeamName(s);
   if (!t || t.length < 2 || t.length > 24) return true;
   if (/^[\d\s.\-+]+$/.test(t)) return true;
-  if (/^[SV]\.\s*\d/i.test(t)) return true;
-  if (/賽事資訊|球隊資訊|運彩盤|國際盤|預測賽事|請先登入|日期|讓分|大小|不讓分|獨贏/.test(t)) return true;
+  // 玩運彩足球或比分區塊常會出現 0 vs S. 0、1 vs S. 4 這種字串，不能當隊名。
+  if (/(^|\s)(vs|v\.s\.?)(\s|$)/i.test(t)) return true;
+  if (/\bS\.\s*\d/i.test(t)) return true;
+  if (/^\d+\s*(vs|v\.s\.?|對)/i.test(t)) return true;
+  if (/賽事資訊|球隊資訊|運彩盤|國際盤|預測賽事|請先登入|日期|讓分|大小|不讓分|獨贏|對戰資訊/.test(t)) return true;
   return false;
 }
 function extractTime(s = '') {
@@ -99,9 +102,14 @@ function buildMarkets({ sport, awayTeam, homeTeam, spreadAway, spreadHome, money
   return { money, spread, total, confidence: [c0, c1, c2] };
 }
 function parseTeamPairFromInfo(text, sport) {
-  const ls = lines(text).filter(x => !/^\d+$/.test(x) && !/^V\.S\.?$/i.test(x) && !/^VS$/i.test(x));
+  const ls = lines(text)
+    .map(x => x.replace(/^對戰資訊\s*/,'').trim())
+    .filter(x => !/^\d+$/.test(x) && !/^V\.S\.?$/i.test(x) && !/^VS$/i.test(x))
+    .filter(x => !/(^|\s)(vs|v\.s\.?)(\s|$)/i.test(x) && !/\bS\.\s*\d/i.test(x));
   if (sport === 'baseball') {
-    return { team: cleanTeamName(ls[0] || ''), detail: ls.slice(1).join(' ') };
+    const team = cleanTeamName(ls[0] || '');
+    const detail = ls.slice(1).filter(x => !isBadTeamName(x) || /[A-Za-z]/.test(x)).join(' ');
+    return { team, detail };
   }
   const teams = ls.filter(x => !/^\d+$/.test(x) && !/^[\d]+\s*[:：]?\s*$/.test(x));
   return { teams: teams.map(cleanTeamName).filter(x => !isBadTeamName(x)) };
@@ -142,6 +150,8 @@ function convertGroupToGame(group, target, sourceUrl) {
   if (!time) return null;
   const { awayTeam, homeTeam, awayDetail, homeDetail } = getTeamsFromGroup(group, target.sport);
   if (isBadTeamName(awayTeam) || isBadTeamName(homeTeam) || awayTeam === homeTeam) return null;
+  // MLB/Japanese/KBO/CPBL 賽事不得含足球比分格式，例如「0 vs S. 0 馬卡拉」。
+  if (target.sport === 'baseball' && /(vs|v\.s\.?|\bS\.\s*\d)/i.test(`${awayTeam} ${homeTeam}`)) return null;
 
   let spreadAway = parseMarket(findMarketCell(group, 'td-bank-bet01', '客')?.text || '');
   let spreadHome = parseMarket(findMarketCell(group, 'td-bank-bet01', '主')?.text || '');
@@ -176,12 +186,12 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '玩運彩', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v59-no-demo-fixed-tabs', true_away: awayTeam, true_home: homeTeam,
+      parser_version: 'v60-clean-mlb-team-filter', true_away: awayTeam, true_home: homeTeam,
       display_order: 'home_first', competition, sport_label: target.label,
       starters, core_players: corePlayers,
       odds_hidden: true,
       odds: { spread_away: spreadAway, spread_home: spreadHome, money_away: moneyAway, money_home: moneyHome, money_draw: moneyDraw, total_over: totalOver, total_under: totalUnder },
-      source_note: 'v58 依玩運彩表格 class 解析：非足球只取右側運彩盤；賠率僅做內部信心值，不顯示在前台；足球不讓分視為獨贏。',
+      source_note: 'v60 依玩運彩表格 class 解析：非足球只取右側運彩盤；賠率僅做內部信心值，不顯示在前台；足球不讓分視為獨贏；MLB 會排除含比分/排名代碼的錯誤隊名。',
       data_sources: target.sport === 'football' ? ['玩運彩預測賽事', '台灣運彩盤口', 'SofaScore'] : ['玩運彩預測賽事', 'Yahoo奇摩運動']
     }
   };
@@ -264,10 +274,10 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'playsport-v59', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'playsport-v60', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
-async function archiveTodayToYesterday(reason = 'v59 parsed 0 valid games') {
+async function archiveTodayToYesterday(reason = 'v60 parsed 0 valid games') {
   const today = dateTW(0), yesterday = dateTW(-1);
   let rows = [];
   try { rows = await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true&select=*`) || []; } catch(e) { console.warn(e.message); }
@@ -279,10 +289,10 @@ async function archiveTodayToYesterday(reason = 'v59 parsed 0 valid games') {
 }
 async function upsertDailyGames(rows) {
   const today = dateTW(0);
-  if (!rows.length) { await archiveTodayToYesterday('v59 parsed 0 valid games'); return; }
+  if (!rows.length) { await archiveTodayToYesterday('v60 parsed 0 valid games'); return; }
   await supabaseRequest(`daily_games?game_date=eq.${today}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() }) });
   await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
-  await writeSyncStatus('success', `v59 synced ${rows.length} valid games`, rows.length);
+  await writeSyncStatus('success', `v60 synced ${rows.length} valid games`, rows.length);
 }
 async function main() {
   const games = await scrapePlaySportWithBrowser();
