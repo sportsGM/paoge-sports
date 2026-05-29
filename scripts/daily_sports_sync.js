@@ -1,0 +1,663 @@
+import { chromium } from 'playwright';
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
+
+const BASE_URL = 'https://www.playsport.cc/predict/games';
+const TARGETS = [
+  { allianceId: 1, label: 'MLB', sport: 'baseball', league: 'MLB' },
+  { allianceId: 2, label: '日本職棒', sport: 'baseball', league: 'NPB' },
+  { allianceId: 6, label: '中華職棒', sport: 'baseball', league: 'CPBL' },
+  { allianceId: 9, label: '韓國職棒', sport: 'baseball', league: 'KBO' },
+  { allianceId: 3, label: 'NBA', sport: 'basketball', league: 'NBA' },
+  { allianceId: 7, label: 'WNBA', sport: 'basketball', league: 'WNBA' },
+  { allianceId: 94, label: '中國職籃', sport: 'basketball', league: 'CBA' },
+  { allianceId: 4, label: '足球', sport: 'football', league: '足球' }
+];
+const US_SHIFT_LEAGUES = new Set(['MLB','NBA','WNBA']);
+function displayDayForLeague(league, dayType) {
+  if (US_SHIFT_LEAGUES.has(league)) return dayType === 'today' ? 'yesterday' : 'today';
+  return dayType;
+}
+function displayDayLabelForLeague(league, dayType) {
+  const v = displayDayForLeague(league, dayType);
+  return v === 'yesterday' ? '昨日賽事' : v === 'tomorrow' ? '明日賽事' : '今日賽事';
+}
+function playSportUrl(target, dayType) {
+  return `${BASE_URL}?allianceid=${target.allianceId}&gameday=${dayType}`;
+}
+
+function taipeiParts() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).formatToParts(new Date()).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
+  return { year: parts.year, month: parts.month, day: parts.day, hour: Number(parts.hour), minute: Number(parts.minute), second: Number(parts.second) };
+}
+async function waitUntilTaipeiDateReady() {
+  const t = taipeiParts();
+  // 台灣時間剛跨日 00:00 時，玩運彩日期按鈕可能還沒完全刷新；等到 00:01:10 再抓。
+  if (t.hour === 0 && t.minute === 0) {
+    const waitMs = Math.max(0, (70 - t.second) * 1000);
+    console.log(`Taipei time is 00:00:${String(t.second).padStart(2,'0')}; waiting ${Math.ceil(waitMs/1000)}s until 00:01 before syncing.`);
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+}
+function dateTW(offsetDays = 0) {
+  const now = new Date();
+  now.setDate(now.getDate() + offsetDays);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+function mdTW(offsetDays = 0) {
+  const d = dateTW(offsetDays).split('-');
+  return `${d[1]}/${d[2]}`;
+}
+function twDateLabel(offsetDays = 0) {
+  const [y,m,d] = dateTW(offsetDays).split('-');
+  return { iso: `${y}-${m}-${d}`, mmdd: `${m}/${d}`, compact: `${m}${d}`, loose: `${Number(m)}/${Number(d)}` };
+}
+function nowISO() { return new Date().toISOString(); }
+function normalize(s = '') { return String(s).replace(/\u00a0/g, ' ').replace(/[\t ]+/g, ' ').replace(/\n\s*/g, '\n').trim(); }
+function lines(s = '') { return normalize(s).split('\n').map(x => x.replace(/[○◎●◯]/g, '').trim()).filter(Boolean); }
+function oneLine(s = '') { return normalize(s).replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim(); }
+function cleanTeamName(s = '') {
+  return oneLine(s)
+    .replace(/^(客隊|主隊|客|主|和|V\.S\.|VS|對戰資訊|AM|PM)\s*/i, '')
+    .replace(/^\d{1,5}\s*$/, '')
+    .replace(/^[\d.\-+]+\s*/, '')
+    .replace(/[,，|｜:：]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function isBadTeamName(s = '') {
+  const t = cleanTeamName(s);
+  if (!t || t.length < 2 || t.length > 24) return true;
+  if (/^[\d\s.\-+]+$/.test(t)) return true;
+  // 玩運彩足球或比分區塊常會出現 0 vs S. 0、1 vs S. 4 這種字串，不能當隊名。
+  if (/(^|\s)(vs|v\.s\.?)(\s|$)/i.test(t)) return true;
+  if (/\bS\.\s*\d/i.test(t)) return true;
+  if (/^\d+\s*(vs|v\.s\.?|對)/i.test(t)) return true;
+  if (/賽事資訊|球隊資訊|運彩盤|國際盤|預測賽事|請先登入|日期|讓分|大小|不讓分|獨贏|對戰資訊/.test(t)) return true;
+  return false;
+}
+function extractTime(s = '') {
+  const m = oneLine(s).match(/\b(?:AM|PM)\s*\d{1,2}:\d{2}\b|\b\d{1,2}:\d{2}\b/i);
+  return m ? m[0].replace(/\s+/, ' ').toUpperCase() : '';
+}
+function pickByClass(row, cls) { return row.cells.find(c => c.cls.includes(cls)); }
+function clsHas(cell, cls) { return cell?.cls?.includes(cls); }
+function parseNumberList(s = '') { return [...String(s).matchAll(/[+-]?\d+(?:\.\d+)?/g)].map(m => Number(m[0])); }
+function parseMarket(text = '') {
+  const raw = oneLine(text).replace(/\s*,\s*/g, ', ');
+  const side = raw.includes('客') ? '客' : raw.includes('主') ? '主' : raw.includes('和') ? '和' : raw.includes('大') ? '大' : raw.includes('小') ? '小' : '';
+  const nums = parseNumberList(raw);
+  let line = null, odds = null;
+  if (side === '大' || side === '小') {
+    line = nums[0] ?? null;
+    odds = nums.length > 1 ? nums[nums.length - 1] : null;
+  } else if (side === '客' || side === '主') {
+    // 讓分盤有 +1.5/-1.5；不讓分只有賠率。由 class 決定用途。
+    line = nums[0] ?? null;
+    odds = nums.length > 1 ? nums[nums.length - 1] : nums[0] ?? null;
+  } else if (side === '和') {
+    odds = nums[0] ?? null;
+  }
+  return { raw, side, line, odds };
+}
+function chooseLowerOdd(a, b, c = null) {
+  return [a,b,c].filter(x => x && typeof x.odds === 'number' && x.odds > 0).sort((x,y)=>x.odds-y.odds)[0] || a || b || c || null;
+}
+function displayLine(n) { return n == null ? '' : `${n > 0 ? '+' : ''}${n}`; }
+function buildMarkets({ sport, awayTeam, homeTeam, spreadAway, spreadHome, moneyAway, moneyHome, moneyDraw, totalOver, totalUnder }) {
+  const moneyPick = sport === 'football' ? chooseLowerOdd(moneyAway, moneyHome, moneyDraw) : chooseLowerOdd(moneyAway, moneyHome);
+  const moneyTeam = moneyPick?.side === '客' ? awayTeam : moneyPick?.side === '主' ? homeTeam : '和局';
+  const money = sport === 'football'
+    ? (moneyPick?.side === '客' ? '客隊勝' : moneyPick?.side === '主' ? '主隊勝' : moneyPick?.side === '和' ? '和局' : '獨贏待確認')
+    : (moneyPick?.side === '和' ? '和局' : `${moneyTeam || homeTeam || awayTeam}勝`);
+
+  let spread = '盤口待確認';
+  const spreadPick = chooseLowerOdd(spreadAway, spreadHome);
+  if (sport === 'football') {
+    // 足球：玩運彩「不讓分」視為獨贏，前台用短標籤避免長隊名擠在盤口卡片。
+    if (moneyPick?.side === '客') spread = '客隊勝';
+    else if (moneyPick?.side === '主') spread = '主隊勝';
+    else if (moneyPick?.side === '和') spread = '和局';
+    else spread = '待確認';
+  } else if (spreadPick && spreadPick.line != null) {
+    const team = spreadPick.side === '客' ? awayTeam : homeTeam;
+    spread = `${team} ${displayLine(spreadPick.line)}`;
+  }
+
+  const totalPick = chooseLowerOdd(totalOver, totalUnder);
+  const totalLine = totalOver?.line ?? totalUnder?.line;
+  const total = totalLine != null ? `${totalPick?.side === '小' ? '小' : '大'} ${Math.abs(totalLine)}` : '大小待確認';
+
+  const c0 = moneyPick?.odds ? Math.max(52, Math.min(76, Math.round(100 / moneyPick.odds))) : 60;
+  const c1 = spreadPick?.odds ? Math.max(52, Math.min(72, Math.round(100 / spreadPick.odds))) : 58;
+  const c2 = totalPick?.odds ? Math.max(52, Math.min(70, Math.round(100 / totalPick.odds))) : 56;
+  return { money, spread, total, confidence: [c0, c1, c2] };
+}
+function parseTeamPairFromInfo(text, sport) {
+  const ls = lines(text)
+    .map(x => x.replace(/^對戰資訊\s*/,'').trim())
+    .filter(x => !/^\d+$/.test(x) && !/^V\.S\.?$/i.test(x) && !/^VS$/i.test(x))
+    .filter(x => !/(^|\s)(vs|v\.s\.?)(\s|$)/i.test(x) && !/\bS\.\s*\d/i.test(x));
+  if (sport === 'baseball') {
+    const team = cleanTeamName(ls[0] || '');
+    const detail = ls.slice(1).filter(x => !isBadTeamName(x) || /[A-Za-z]/.test(x)).join(' ');
+    return { team, detail };
+  }
+  const teams = ls.filter(x => !/^\d+$/.test(x) && !/^[\d]+\s*[:：]?\s*$/.test(x));
+  return { teams: teams.map(cleanTeamName).filter(x => !isBadTeamName(x)) };
+}
+function getTeamsFromGroup(group, sport) {
+  const rows = group.rows;
+  const first = rows[0];
+  if (sport === 'baseball') {
+    const awayCell = pickByClass(first, 'td-teaminfo');
+    const homeRow = rows.find((r,idx)=>idx>0 && pickByClass(r, 'td-teaminfo'));
+    const homeCell = homeRow ? pickByClass(homeRow, 'td-teaminfo') : null;
+    const away = parseTeamPairFromInfo(awayCell?.text || '', sport);
+    const home = parseTeamPairFromInfo(homeCell?.text || '', sport);
+    return { awayTeam: away.team, homeTeam: home.team, awayDetail: away.detail, homeDetail: home.detail };
+  }
+  // 籃球/足球若 td-teaminfo rowspan 內含比分表，文字順序通常是 客隊、主隊。
+  const mainTeamCell = rows.flatMap(r=>r.cells).find(c => c.cls.includes('td-teaminfo'));
+  let teams = parseTeamPairFromInfo(mainTeamCell?.text || '', sport).teams || [];
+  if (teams.length < 2) {
+    teams = rows.flatMap(r=>r.cells).filter(c => /(team|secondteam|winnerteam|loserteam|td-teaminfo)/.test(c.cls)).flatMap(c => lines(c.text)).map(cleanTeamName).filter(x => !isBadTeamName(x));
+  }
+  return { awayTeam: teams[0], homeTeam: teams[1], awayDetail: '', homeDetail: '' };
+}
+function findMarketCell(group, cls, side) {
+  for (const r of group.rows) for (const c of r.cells) {
+    if (!c.cls.includes(cls)) continue;
+    const t = oneLine(c.text);
+    if (!t) continue;
+    if (side === '大' || side === '小') { if (t.includes(side)) return c; }
+    else if (side === '和') { if (t.includes('和')) return c; }
+    else if (new RegExp(`(^|\\s|\\|)${side}`).test(t)) return c;
+  }
+  return null;
+}
+
+function statRows(labels){ return labels.map(k => [k, '待更新']); }
+function defaultPitcherStats(){ return statRows(['ERA','WHIP','勝投','敗投','近況']); }
+function defaultCoreStats(sport){
+  if(sport === 'basketball') return statRows(['場均得分','場均失分','命中率','籃板','近況']);
+  if(sport === 'football') return statRows(['近5場進球','近5場失球','控球率','主客場','近況']);
+  return statRows(['近況']);
+}
+function defaultMetrics(away, home, sport){
+  if(sport === 'baseball') return [
+    ['打擊率','待更新','待更新',50,50,'',''],['場均得分','待更新','待更新',50,50,'',''],['團隊防禦率','待更新','待更新',50,50,'',''],['牛棚WHIP','待更新','待更新',50,50,'',''],['近五場','待更新','待更新',50,50,'','']
+  ];
+  if(sport === 'basketball') return [
+    ['場均得分','待更新','待更新',50,50,'',''],['場均失分','待更新','待更新',50,50,'',''],['近五場','待更新','待更新',50,50,'',''],['主客場表現','待更新','待更新',50,50,'',''],['大小分趨勢','待更新','待更新',50,50,'','']
+  ];
+  return [
+    ['近五場進球','待更新','待更新',50,50,'',''],['近五場失球','待更新','待更新',50,50,'',''],['主客場表現','待更新','待更新',50,50,'',''],['歷史對戰','待更新','待更新',50,50,'',''],['盤口適配','待更新','待更新',50,50,'','']
+  ];
+}
+function defaultInjuries(away, home, sport){
+  if(sport === 'baseball') return [[away,'傷兵名單','待更新',''],[home,'傷兵名單','待更新','']];
+  return [[away,'傷停狀況','待更新',''],[home,'傷停狀況','待更新','']];
+}
+function defaultH2H(away, home){ return [['待更新',[away,'-'],[home,'-'],'待更新']]; }
+function defaultRecent(away, home){ return [
+  {team:away,side:'客隊',items:[['近況',away,'待更新','-']]},
+  {team:home,side:'主隊',items:[['近況',home,'待更新','-']]}
+]; }
+function cleanAnalysisText(s=''){
+  return String(s||'').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'').replace(/\s+/g,' ').trim();
+}
+function hasFinishedScore(group) {
+  // 玩運彩今日頁已完賽常會在 scores 欄位顯示兩邊比分，例如 7 V.S. 1。
+  // 只要今日頁出現完整比分，就視為 finished，不放到可預測列表。
+  return group.rows.flatMap(r => r.cells).some(c => {
+    if (!String(c.cls || '').includes('scores')) return false;
+    const nums = String(c.text || '').match(/\b\d+\b/g) || [];
+    return /V\.?S\.?/i.test(String(c.text || '')) && nums.length >= 2;
+  });
+}
+
+
+function firstLinkByText(group, re){
+  for(const r of group.rows) for(const c of r.cells) for(const a of (c.links||[])) if(re.test(a.text||'') || re.test(a.href||'')) return a.href;
+  return '';
+}
+function teamLinksFromGroup(group){
+  const out=[];
+  for(const r of group.rows) for(const c of r.cells) for(const a of (c.links||[])){
+    if(/gamesData\/teams/.test(a.href||'') && a.text) out.push({team:cleanTeamName(a.text), url:a.href});
+  }
+  const seen=new Set();
+  return out.filter(x=>x.team && !seen.has(x.team) && seen.add(x.team));
+}
+function compactTextForAnalysis(txt=''){
+  return oneLine(txt).replace(/登入|加入會員|客服電話|玩運彩網路有限公司|This site is protected.*$/g,'').slice(0,1200);
+}
+function pickUsefulSentences(text, keys, limit=3){
+  const raw=String(text||'').replace(/\s+/g,' ');
+  const parts=raw.split(/[。；;\n]/).map(s=>s.trim()).filter(Boolean);
+  const hits=parts.filter(s=>keys.some(k=>s.includes(k))).slice(0,limit);
+  return hits.length ? hits.join('；') : '待更新';
+}
+function numericHint(text, keys){
+  const raw=String(text||'');
+  for(const k of keys){
+    const idx=raw.indexOf(k);
+    if(idx>=0){
+      const chunk=raw.slice(Math.max(0,idx-18), idx+42).replace(/\s+/g,' ').trim();
+      if(/[0-9]/.test(chunk)) return chunk;
+    }
+  }
+  return '待更新';
+}
+
+function convertGroupToGame(group, target, sourceUrl) {
+  const allText = group.rows.map(r => r.text).join(' ');
+  const time = extractTime(allText);
+  if (!time) return null;
+  const { awayTeam, homeTeam, awayDetail, homeDetail } = getTeamsFromGroup(group, target.sport);
+  if (isBadTeamName(awayTeam) || isBadTeamName(homeTeam) || awayTeam === homeTeam) return null;
+  // MLB/Japanese/KBO/CPBL 賽事不得含足球比分格式，例如「0 vs S. 0 馬卡拉」。
+  if (target.sport === 'baseball' && /(vs|v\.s\.?|\bS\.\s*\d)/i.test(`${awayTeam} ${homeTeam}`)) return null;
+
+  let spreadAway = parseMarket(findMarketCell(group, 'td-bank-bet01', '客')?.text || '');
+  let spreadHome = parseMarket(findMarketCell(group, 'td-bank-bet01', '主')?.text || '');
+  let moneyAway = parseMarket(findMarketCell(group, 'td-bank-bet03', '客')?.text || '');
+  let moneyHome = parseMarket(findMarketCell(group, 'td-bank-bet03', '主')?.text || '');
+  let moneyDraw = parseMarket(findMarketCell(group, target.sport === 'football' ? 'td-bank-bet01' : 'td-bank-bet03', '和')?.text || '');
+  const totalOver = parseMarket(findMarketCell(group, 'td-bank-bet02', '大')?.text || '');
+  const totalUnder = parseMarket(findMarketCell(group, 'td-bank-bet02', '小')?.text || '');
+
+  // 非足球才用 td-bank-bet01 當讓分；足球 bet01 是和局，不可當讓分。
+  if (target.sport === 'football') { spreadAway = null; spreadHome = null; }
+
+  const markets = buildMarkets({ sport: target.sport, awayTeam, homeTeam, spreadAway, spreadHome, moneyAway, moneyHome, moneyDraw, totalOver, totalUnder });
+  const gameInfoCell = group.rows[0].cells.find(c => c.cls.includes('td-gameinfo'));
+  const competition = target.sport === 'football'
+    ? lines(gameInfoCell?.text || '').filter(x => !/^\d{3,5}$/.test(x) && !/^(AM|PM)/i.test(x) && !/\d{1,2}:\d{2}/.test(x))[0] || '足球'
+    : target.league;
+
+  const starters = target.sport === 'baseball' ? [
+    { team: homeTeam, name: homeDetail || '先發待公布', role: '主隊先發', stats: [...defaultPitcherStats()] },
+    { team: awayTeam, name: awayDetail || '先發待公布', role: '客隊先發', stats: [...defaultPitcherStats()] }
+  ] : [];
+  const corePlayers = target.sport === 'basketball' ? [
+    { team: homeTeam, name: '核心球員待更新', role: '主隊', award: '近期狀態、傷兵與主客場數據待更新', stats: defaultCoreStats(target.sport) },
+    { team: awayTeam, name: '核心球員待更新', role: '客隊', award: '近期狀態、傷兵與主客場數據待更新', stats: defaultCoreStats(target.sport) }
+  ] : [];
+
+  return {
+    game_date: group.syncDate || dateTW(0), game_day_type: group.dayType || 'today', game_status: 'upcoming', sport: target.sport, league: target.league, game_time: time,
+    // 前台用 away vs home 顯示；依需求主隊放第一個，故欄位反向存放。
+    away: homeTeam, home: awayTeam,
+    money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
+    source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
+    analysis_json: {
+      parser_version: 'v71-clean-reset', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'),
+      starters, core_players: corePlayers,
+      metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
+      injuries: defaultInjuries(awayTeam, homeTeam, target.sport),
+      h2h: defaultH2H(awayTeam, homeTeam),
+      recent: defaultRecent(awayTeam, homeTeam),
+      football_summary: target.sport === 'football' ? {
+        home: `${homeTeam} 近期狀態待更新，系統會依主場表現、近五場攻防與盤口變化補齊。`,
+        away: `${awayTeam} 近期狀態待更新，系統會依客場表現、近五場攻防與盤口變化補齊。`,
+        conclusion: `本場先以獨贏方向 ${markets.money}、大小分 ${markets.total} 作為初步參考；詳細近期對戰與雙方狀態由資料中心補齊。`
+      } : null,
+      detail_status: 'pending',
+      odds_hidden: true,
+      odds: { spread_away: spreadAway, spread_home: spreadHome, money_away: moneyAway, money_home: moneyHome, money_draw: moneyDraw, total_over: totalOver, total_under: totalUnder },
+      source_note: '',
+      data_sources: []
+    },
+    raw_data: {
+      raw_day_type: group.rawDayType || group.dayType || 'today',
+      raw_text: oneLine(group.rows.map(r => r.text).join(' | ')).slice(0, 6000),
+      raw_markets: {
+        spread_away: spreadAway, spread_home: spreadHome,
+        money_away: moneyAway, money_home: moneyHome, money_draw: moneyDraw,
+        total_over: totalOver, total_under: totalUnder
+      },
+      links: { battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group) }
+    }
+  };
+}
+async function clickByText(page, label) {
+  try { await page.getByText(label, { exact: true }).first().click({ timeout: 5000 }); await page.waitForTimeout(1500); return true; } catch {}
+  try { await page.locator(`text=${label}`).first().click({ timeout: 5000 }); await page.waitForTimeout(1500); return true; } catch {}
+  return false;
+}
+async function clickAllGames(page) {
+  // 玩運彩進入 today/tomorrow 後，還要點「所有賽事」才會展開全部聯盟。
+  const labels = ['所有賽事','全部賽事','全部','All'];
+  for (const label of labels) {
+    const ok = await clickByText(page, label);
+    if (ok) { console.log(`Clicked all-games tab: ${label}`); await page.waitForTimeout(2000); return true; }
+  }
+  // 有些版面「所有賽事」不是按鈕，而是 tab 文字；用 DOM 模糊點擊。
+  const clicked = await page.evaluate(() => {
+    const els = [...document.querySelectorAll('a,button,div,span,li')];
+    const visible = el => {
+      const r = el.getBoundingClientRect();
+      const st = window.getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && st.display !== 'none' && st.visibility !== 'hidden';
+    };
+    const hit = els.find(el => visible(el) && /所有賽事|全部賽事/.test((el.innerText || el.textContent || '').replace(/\s+/g,'')));
+    if (hit) { hit.click(); return (hit.innerText || hit.textContent || '').trim(); }
+    return '';
+  });
+  if (clicked) { console.log(`Clicked all-games tab by DOM: ${clicked}`); await page.waitForTimeout(2000); return true; }
+  console.warn('All-games tab not found; continuing with current page content.');
+  return false;
+}
+async function clickTodayDate(page) { return true; }
+async function extractGroups(page) {
+  return await page.evaluate(() => {
+    const norm = s => String(s || '').replace(/\u00a0/g, ' ').trim();
+    const cellObj = td => { const st = window.getComputedStyle(td); return { text: norm(td.innerText || td.textContent || ''), cls: [...td.classList].join(' '), color: st.color || '', rowspan: Number(td.getAttribute('rowspan') || '1'), colspan: Number(td.getAttribute('colspan') || '1'), links: [...td.querySelectorAll('a')].map(a=>({text:norm(a.innerText||a.textContent||''), href:a.href||''})) }; };
+    const tables = [...document.querySelectorAll('table.predictgame-table')];
+    const table = tables[0] || [...document.querySelectorAll('table')].sort((a,b)=>(b.innerText||'').length-(a.innerText||'').length)[0];
+    if (!table) return [];
+    const trs = [...table.querySelectorAll('tr')].map(tr => ({ text: norm(tr.innerText || tr.textContent || ''), cells: [...tr.children].filter(el => /^(TD|TH)$/.test(el.tagName)).map(cellObj) })).filter(r => r.cells.length && r.text);
+    const groups = [];
+    let cur = null;
+    for (const row of trs) {
+      const rowText = row.text.replace(/\s+/g, ' ');
+      if (/賽事資訊|球隊資訊|運彩盤|國際盤|日期/.test(rowText)) continue;
+      const starts = row.cells.some(c => c.cls.includes('td-gameinfo')) && /(?:AM|PM)\s*\d{1,2}:\d{2}|\d{1,2}:\d{2}/i.test(rowText);
+      const spacer = row.cells.length === 1 && !row.text.trim();
+      if (starts) { if (cur) groups.push(cur); cur = { rows: [row] }; }
+      else if (cur && !spacer) cur.rows.push(row);
+      else if (cur && spacer) { groups.push(cur); cur = null; }
+    }
+    if (cur) groups.push(cur);
+    // 今日頁會包含已完賽賽事，玩運彩常以綠色字或完賽/結束字樣標示；同步時要排除。
+    return groups.map(g => {
+      const text = g.rows.map(r=>r.text).join(' ');
+      const green = g.rows.flatMap(r=>r.cells).some(c => /rgb\(0,\s*128,\s*0\)|rgb\(34,\s*197,\s*94\)|green/i.test(c.color || '') && /完|結束|終了|已/.test(c.text || ''));
+      const scoreFinished = g.rows.flatMap(r => r.cells).some(c => String(c.cls || '').includes('scores') && /V\.?S\.?/i.test(c.text || '') && ((c.text || '').match(/\b\d+\b/g) || []).length >= 2);
+      return { ...g, finished: green || scoreFinished || /已完賽|完賽|比賽結束|賽事結束|終場|終了|Final/i.test(text) };
+    });
+  });
+}
+async function scrapePlaySportWithBrowser() {
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox','--disable-dev-shm-usage'] });
+  const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36' });
+  const games = [];
+  const dayPlans = [
+    { type: 'today', label: '今日賽事', offset: 0 },
+    { type: 'tomorrow', label: '明日賽事', offset: 1 }
+  ];
+  try {
+    for (const day of dayPlans) {
+      const syncDate = dateTW(day.offset);
+      console.log(`=== ${day.label} / ${syncDate} ===`);
+      for (const target of TARGETS) {
+        const page = await context.newPage();
+        const url = playSportUrl(target, day.type);
+        try {
+          console.log(`Opening PlaySport target: ${day.type} ${target.label} -> ${url}`);
+          // v66：不再進總頁後找「所有賽事」，直接逐聯盟打開官方網址。
+          // 例如 MLB today = /predict/games?allianceid=1&gameday=today。
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+          try { await page.waitForLoadState('networkidle', { timeout: 12000 }); } catch {}
+          await page.waitForTimeout(1800);
+          let groups = await extractGroups(page);
+          const totalGroups = groups.length;
+          const storedDayType = displayDayForLeague(target.league, day.type);
+          // MLB / NBA / WNBA：gameday=today 是「昨日賽事」，需保留全部賽果；gameday=tomorrow 是「今日賽事」。
+          // 其他聯盟：今日頁排除已完賽，明日頁保留可預測賽事。
+          const shouldSkipFinished = !US_SHIFT_LEAGUES.has(target.league) && day.type === 'today';
+          if (shouldSkipFinished) groups = groups.filter(g => !g.finished);
+          let parsed = 0, rejectedFinished = totalGroups - groups.length;
+          for (const group of groups) {
+            group.rawDayType = day.type;
+            group.dayType = storedDayType;
+            group.syncDate = syncDate;
+            const g = convertGroupToGame(group, target, page.url());
+            if (g) { g.game_status = group.finished ? 'finished' : 'upcoming'; games.push(g); parsed++; }
+          }
+          console.log(`${day.type} ${target.label} -> ${storedDayType} (${displayDayLabelForLeague(target.league, day.type)}): url=${url}, groups=${totalGroups}, finished_skipped=${rejectedFinished}, parsed=${parsed}, game_date=${syncDate}${US_SHIFT_LEAGUES.has(target.league)?' (美國時差：today=昨日完整賽果 / tomorrow=今日可預測)':target.sport==='football'?' (足球短版/無核心球員)':''}`);
+        } catch(e) { console.warn(`${day.type} ${target.label} scrape failed: ${e.message}`); }
+        finally { await page.close().catch(()=>{}); }
+      }
+    }
+  } finally { }
+  await enrichGamesWithDetails(context, games);
+  await context.close().catch(()=>{}); await browser.close().catch(()=>{});
+  const map = new Map();
+  for (const g of games) { const key = `${g.game_day_type}|${g.game_date}|${g.league}|${g.away}|${g.home}|${g.game_time}`; if (!map.has(key)) map.set(key, g); }
+  return [...map.values()].sort((a,b)=>`${a.game_day_type}${a.league}${a.game_time}`.localeCompare(`${b.game_day_type}${b.league}${b.game_time}`));
+}
+
+async function safePageText(context, url){
+  if(!url) return '';
+  const page=await context.newPage();
+  try{
+    await page.goto(url,{waitUntil:'domcontentloaded',timeout:25000});
+    try{ await page.waitForLoadState('networkidle',{timeout:8000}); }catch{}
+    await page.waitForTimeout(800);
+    return await page.evaluate(()=>document.body ? document.body.innerText : '');
+  }catch(e){ console.warn('detail page failed:', url, e.message); return ''; }
+  finally{ await page.close().catch(()=>{}); }
+}
+
+function strictSliceAround(text, key, radius = 220) {
+  const raw = String(text || '').replace(/\s+/g, ' ');
+  const k = String(key || '').trim();
+  if (!k) return raw.slice(0, radius);
+  const idx = raw.indexOf(k);
+  if (idx < 0) return '';
+  return raw.slice(Math.max(0, idx - radius), idx + k.length + radius);
+}
+function firstStrictNumber(text, regexes) {
+  const raw = String(text || '').replace(/\s+/g, ' ');
+  for (const re of regexes) {
+    const m = raw.match(re);
+    if (m && (m[1] || m[2])) return (m[1] || m[2]).trim();
+  }
+  return '待更新';
+}
+function strictPitcherStat(allText, pitcherName, field) {
+  const area = strictSliceAround(allText, pitcherName, 260) || String(allText || '').slice(0, 1200);
+  if (field === 'ERA') return firstStrictNumber(area, [/\bERA\b\s*[:：]?\s*(\d+(?:\.\d+)?)/i, /防禦率\s*[:：]?\s*(\d+(?:\.\d+)?)/]);
+  if (field === 'WHIP') return firstStrictNumber(area, [/\bWHIP\b\s*[:：]?\s*(\d+(?:\.\d+)?)/i]);
+  if (field === '勝投') return firstStrictNumber(area, [/(\d+)\s*勝/, /\bW\s*[:：]?\s*(\d+)\b/i]);
+  if (field === '敗投') return firstStrictNumber(area, [/(\d+)\s*敗/, /\bL\s*[:：]?\s*(\d+)\b/i]);
+  if (field === '近況') {
+    const v = pickUsefulSentences(area, [pitcherName, '近況', '最近', '先發'], 1);
+    return v && v.length <= 70 ? cleanAnalysisText(v) : '待更新';
+  }
+  return '待更新';
+}
+function strictTeamNumber(allText, team, labels) {
+  const area = strictSliceAround(allText, team, 280) || '';
+  if (!area) return '待更新';
+  for (const label of labels) {
+    const v = firstStrictNumber(area, [new RegExp(`${label}\\s*[:：]?\\s*(\\d+(?:\\.\\d+)?%?)`, 'i')]);
+    if (v !== '待更新') return v;
+  }
+  return '待更新';
+}
+function safeShortNote(text, keys) {
+  const v = cleanAnalysisText(pickUsefulSentences(text, keys, 1));
+  if (!v || v === '待更新' || v.length > 80) return '待更新';
+  return v;
+}
+function enrichGameFromTexts(game, battleText, teamTexts){
+  const aj=game.analysis_json||{};
+  const allText=cleanAnalysisText(compactTextForAnalysis([battleText,...teamTexts.map(x=>x.text)].join(' ')));
+  const away=aj.true_away || game.home;
+  const home=aj.true_home || game.away;
+
+  const recentAway=safeShortNote(strictSliceAround(allText, away, 360), [away,'近況','近五場','最近','戰績']);
+  const recentHome=safeShortNote(strictSliceAround(allText, home, 360), [home,'近況','近五場','最近','戰績']);
+  const h2hNote=safeShortNote(allText, ['對戰','交手','歷史']);
+  const injuryAway=safeShortNote(strictSliceAround(allText, away, 360), ['傷','缺陣','傷兵','injury']);
+  const injuryHome=safeShortNote(strictSliceAround(allText, home, 360), ['傷','缺陣','傷兵','injury']);
+
+  aj.h2h = [['近期對戰', [away,'待更新'], [home,'待更新'], h2hNote]];
+  aj.recent = [
+    {team: away, side:'客隊', items:[['近期', away, recentAway, '-']]},
+    {team: home, side:'主隊', items:[['近期', home, recentHome, '-']]}
+  ];
+  aj.injuries = [[away,'傷員狀況',injuryAway,'-'],[home,'傷員狀況',injuryHome,'-']];
+
+  if(game.sport==='baseball'){
+    const starterStats = name => [
+      ['ERA', strictPitcherStat(allText, name, 'ERA')],
+      ['WHIP', strictPitcherStat(allText, name, 'WHIP')],
+      ['勝投', strictPitcherStat(allText, name, '勝投')],
+      ['敗投', strictPitcherStat(allText, name, '敗投')],
+      ['近況', strictPitcherStat(allText, name, '近況')]
+    ];
+    if(Array.isArray(aj.starters)) aj.starters = aj.starters.map(s=>({...s, stats: starterStats(s.name||'')}));
+    aj.metrics = [
+      ['打擊率', strictTeamNumber(allText, away, ['打擊率','AVG']), strictTeamNumber(allText, home, ['打擊率','AVG']),50,50,'',''],
+      ['場均得分', strictTeamNumber(allText, away, ['場均得分','得分']), strictTeamNumber(allText, home, ['場均得分','得分']),50,50,'',''],
+      ['團隊防禦率', strictTeamNumber(allText, away, ['防禦率','ERA']), strictTeamNumber(allText, home, ['防禦率','ERA']),50,50,'',''],
+      ['近五場', recentAway, recentHome,50,50,'','']
+    ];
+  } else if(game.sport==='basketball'){
+    aj.metrics = [
+      ['場均得分', strictTeamNumber(allText, away, ['場均得分','得分','PTS']), strictTeamNumber(allText, home, ['場均得分','得分','PTS']),50,50,'',''],
+      ['場均失分', strictTeamNumber(allText, away, ['場均失分','失分']), strictTeamNumber(allText, home, ['場均失分','失分']),50,50,'',''],
+      ['命中率', strictTeamNumber(allText, away, ['命中率','FG%']), strictTeamNumber(allText, home, ['命中率','FG%']),50,50,'',''],
+      ['近五場', recentAway, recentHome,50,50,'','']
+    ];
+    if(Array.isArray(aj.core_players)) aj.core_players = aj.core_players.map(p=>({...p, name:'核心球員待更新', award:'待更新', stats:[['場均得分', strictTeamNumber(allText,p.team,['場均得分','得分','PTS'])],['籃板', strictTeamNumber(allText,p.team,['籃板','REB'])],['助攻', strictTeamNumber(allText,p.team,['助攻','AST'])],['傷停', safeShortNote(strictSliceAround(allText,p.team,360),['傷','缺陣'])]]}));
+  } else if(game.sport==='football'){
+    aj.football_summary = {
+      home: `${home}：${recentHome}`,
+      away: `${away}：${recentAway}`,
+      conclusion: `綜合盤口方向與近期狀態，本場先以 ${game.money}、${game.total} 作為主要參考。`
+    };
+    aj.metrics = [
+      ['近期進球', strictTeamNumber(allText, away, ['進球']), strictTeamNumber(allText, home, ['進球']),50,50,'',''],
+      ['近期失球', strictTeamNumber(allText, away, ['失球']), strictTeamNumber(allText, home, ['失球']),50,50,'',''],
+      ['近五場', recentAway, recentHome,50,50,'',''],
+      ['歷史對戰', h2hNote, h2hNote,50,50,'','']
+    ];
+  }
+  aj.detail_status = allText ? 'strict_partial' : 'pending';
+  aj.source_note=''; aj.data_sources=[];
+  game.analysis_json=aj;
+  return game;
+}
+async function enrichGamesWithDetails(context, games){
+  const limit = Number(process.env.DETAIL_ENRICH_LIMIT || 30);
+  let n=0;
+  for(const game of games){
+    if(n>=limit) break;
+    const aj=game.analysis_json||{};
+    const urls=(aj.team_urls||[]).slice(0,2);
+    const battleText=await safePageText(context, aj.battle_url);
+    const teamTexts=[];
+    for(const u of urls){ teamTexts.push({team:u.team, text:await safePageText(context,u.url)}); }
+    enrichGameFromTexts(game,battleText,teamTexts);
+    n++;
+  }
+  console.log(`Detail enrichment attempted for ${Math.min(n,games.length)} games.`);
+  return games;
+}
+
+async function supabaseRequest(path, options = {}) {
+  const url = `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/${path}`;
+  const res = await fetch(url, { ...options, headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
+  const txt = await res.text();
+  if (!res.ok) throw new Error(txt || `${res.status} ${res.statusText}`);
+  try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
+}
+async function writeSyncStatus(status, message, count = 0) {
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v71-clean-reset', created_at: nowISO() }]) }); }
+  catch(e) { console.warn('daily_sync_status not written:', e.message); }
+}
+
+function stripDailyRow(row) {
+  const { raw_data, ...clean } = row;
+  return clean;
+}
+async function writeRawSportsData(rows) {
+  let runId = null;
+  try {
+    const run = await supabaseRequest('raw_sports_sync_runs', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify([{ source: 'github_actions', version: 'v71-clean-reset', status: 'success', total_games: rows.length, created_at: nowISO() }])
+    });
+    runId = Array.isArray(run) && run[0] ? run[0].id : null;
+  } catch (e) { console.warn('raw_sports_sync_runs not written:', e.message); }
+
+  if (!runId || !rows.length) return;
+  const rawRows = rows.map(g => ({
+    run_id: runId,
+    game_date: g.game_date,
+    game_day_type: g.game_day_type,
+    game_status: g.game_status || 'upcoming',
+    sport: g.sport,
+    league: g.league,
+    game_time: g.game_time,
+    away: g.away,
+    home: g.home,
+    source_url: g.source_url,
+    raw_text: g.raw_data?.raw_text || '',
+    parsed_json: { ...g, raw_data: g.raw_data || {} },
+    created_at: nowISO()
+  }));
+  try {
+    await supabaseRequest('raw_sports_games', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(rawRows) });
+    console.log(`Raw data center saved ${rawRows.length} raw_sports_games rows.`);
+  } catch (e) { console.warn('raw_sports_games not written:', e.message); }
+
+  // SQL 統整層：若 Supabase 已建立 function，讓資料庫統一做二次整理；失敗不影響前台基本賽事。
+  try {
+    await supabaseRequest('rpc/normalize_raw_sports_games_v70_optional', { method: 'POST', body: JSON.stringify({ p_run_id: runId }) });
+    console.log('Supabase normalize_raw_sports_games_v70_optional executed.');
+  } catch (e) { console.warn('normalize_raw_sports_games_v70_optional skipped:', e.message); }
+}
+function dedupeGames(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const row of rows) {
+    const key = [row.game_day_type, row.sport, row.league, row.game_time, row.home, row.away].map(v => String(v || '').trim()).join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
+  }
+  return out;
+}
+async function upsertDailyGames(rows) {
+  // v71 clean reset：不再依賴 Supabase unique constraint / ON CONFLICT。
+  // 每次同步先把今日/明日/昨日三個顯示池關掉，再直接寫入本次抓到的乾淨資料。
+  const cleanRows = dedupeGames(rows).map(stripDailyRow);
+  try { await writeRawSportsData(cleanRows); } catch(e) { console.warn('raw data center skipped:', e.message); }
+  await supabaseRequest(`daily_games?game_day_type=in.(today,tomorrow,yesterday)`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ active: false, updated_at: nowISO() })
+  }).catch(e=>console.warn('deactivate old display rows failed:', e.message));
+  if (!cleanRows.length) { await writeSyncStatus('empty', 'v71 parsed 0 valid games', 0); return; }
+  await supabaseRequest('daily_games', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify(cleanRows)
+  });
+  await writeSyncStatus('success', `v71 synced ${cleanRows.length} valid games`, cleanRows.length);
+}
+
+async function main() {
+  await waitUntilTaipeiDateReady();
+  console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}), tomorrow=${dateTW(1)} (${mdTW(1)})`);
+  const games = await scrapePlaySportWithBrowser();
+  console.log(`Parsed valid games v71 clean: ${games.length}`);
+  console.log(games.slice(0, 60).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
+  await upsertDailyGames(games);
+  console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid upcoming games parsed for today/tomorrow.');
+}
+main().catch(err => { console.error(err); process.exit(1); });
