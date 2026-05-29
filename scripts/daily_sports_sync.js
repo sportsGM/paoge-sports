@@ -1223,8 +1223,32 @@ async function writeSyncStatus(status, message, count = 0) {
 }
 
 function stripDailyRow(row) {
-  const { raw_data, ...clean } = row;
+  // Supabase/PostgREST bulk insert requires every object in the array to have the same keys.
+  // Promoted rows read back from daily_games contain db-only fields such as id/created_at, while
+  // freshly scraped rows do not. Keep only the columns we intentionally write, then normalize later.
+  const { id, created_at, raw_data, ...clean } = row;
   return clean;
+}
+
+const DAILY_GAME_COLUMNS = [
+  'game_date', 'game_day_type', 'game_status', 'sport', 'league', 'game_time',
+  'away', 'home', 'money', 'spread', 'total', 'confidence',
+  'source_url', 'source_name', 'analysis_json', 'active', 'updated_at'
+];
+
+function normalizeDailyRowsForInsert(rows) {
+  return rows.map(row => {
+    const out = {};
+    for (const col of DAILY_GAME_COLUMNS) {
+      if (col === 'analysis_json') out[col] = row[col] && typeof row[col] === 'object' ? row[col] : {};
+      else if (col === 'confidence') out[col] = Array.isArray(row[col]) ? row[col] : [0, 0, 0];
+      else if (col === 'active') out[col] = row[col] !== false;
+      else if (col === 'game_status') out[col] = row[col] || 'upcoming';
+      else if (col === 'updated_at') out[col] = row[col] || nowISO();
+      else out[col] = row[col] ?? null;
+    }
+    return out;
+  });
 }
 async function writeRawSportsData(rows) {
   let runId = null;
@@ -1297,22 +1321,24 @@ function dedupeGames(rows) {
   return out;
 }
 async function upsertDailyGames(rows) {
-  // v97：維護今日/明日雙顯示池；同步前先刪除 today/tomorrow 舊資料，再寫入本次乾淨資料。
-  const cleanRows = dedupeGames(rows).map(stripDailyRow);
-  try { await writeRawSportsData(cleanRows); } catch(e) { console.warn('raw data center skipped:', e.message); }
+  // v98：維護今日/明日雙顯示池；同步前先刪除 today/tomorrow 舊資料，再寫入本次乾淨資料。
+  // 重點修正：所有 insert 物件使用完全相同 keys，避免 PostgREST: All object keys must match。
+  const cleanRowsRaw = dedupeGames(rows).map(stripDailyRow);
+  try { await writeRawSportsData(cleanRowsRaw); } catch(e) { console.warn('raw data center skipped:', e.message); }
   for (const dayType of ['today','tomorrow']) {
     await supabaseRequest(`daily_games?game_day_type=eq.${dayType}`, {
       method: 'DELETE',
       headers: { Prefer: 'return=minimal' }
     }).catch(e=>console.warn(`delete old ${dayType} rows failed:`, e.message));
   }
-  if (!cleanRows.length) { await writeSyncStatus('empty', 'v97 parsed 0 valid games', 0); return; }
+  if (!cleanRowsRaw.length) { await writeSyncStatus('empty', 'v98 parsed 0 valid games', 0); return; }
+  const cleanRows = normalizeDailyRowsForInsert(cleanRowsRaw);
   await supabaseRequest('daily_games', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify(cleanRows)
   });
-  await writeSyncStatus('success', `v97 synced ${cleanRows.length} valid games`, cleanRows.length);
+  await writeSyncStatus('success', `v98 synced ${cleanRows.length} valid games`, cleanRows.length);
 }
 
 async function main() {
@@ -1321,7 +1347,7 @@ async function main() {
   const promoted = await loadPromotedTomorrowRows();
   const scraped = await scrapePlaySportWithBrowser();
   const games = [...promoted, ...scraped];
-  console.log(`Parsed valid games v97 today/tomorrow: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
+  console.log(`Parsed valid games v98 today/tomorrow: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   await upsertDailyGames(games);
   console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed for today/tomorrow display pools.');
