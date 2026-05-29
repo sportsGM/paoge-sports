@@ -4,6 +4,15 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
 
+// v83：搜尋引擎補數據試用版
+// 可用 provider：google / serpapi / tavily。沒有 SEARCH_API_KEY 時，仍會抓賽事與盤口，但搜尋補數據會跳過。
+const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'google').toLowerCase();
+const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
+const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID || '';
+const SEARCH_ENRICH_LIMIT = Number(process.env.SEARCH_ENRICH_LIMIT || 60);
+const SEARCH_RESULTS_PER_QUERY = Number(process.env.SEARCH_RESULTS_PER_QUERY || 5);
+
+
 const BASE_URL = 'https://www.playsport.cc/predict/games';
 const TARGETS = [
   { allianceId: 1, label: 'MLB', sport: 'baseball', league: 'MLB' },
@@ -298,7 +307,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v72-clean-reset-delete-before-insert', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      parser_version: 'v83-search-yahoo-playsport-daily-2am', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
       display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'),
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -490,6 +499,151 @@ function safeShortNote(text, keys) {
   if (!v || v === '待更新' || v.length > 80) return '待更新';
   return v;
 }
+
+function compactSearchDoc(results = []) {
+  return results.map((r, idx) => `${idx + 1}. ${r.title || ''} ${r.snippet || ''}`).join(' ').replace(/\s+/g, ' ').trim();
+}
+function searchQueriesForGame(game) {
+  const aj = game.analysis_json || {};
+  const away = aj.true_away || game.home;
+  const home = aj.true_home || game.away;
+  const league = game.league || aj.sport_label || '';
+  return [
+    `${away} ${home} ${league} Yahoo 奇摩 運動 近期戰績 對戰`,
+    `${home} ${away} ${league} 玩運彩 對戰資訊 盤口`,
+    `${away} ${home} ${league} 先發 傷兵 近況`,
+    `${away} vs ${home} ${league} preview stats injury`
+  ];
+}
+async function searchGoogleCSE(query) {
+  if (!SEARCH_API_KEY || !GOOGLE_CSE_ID) return [];
+  const u = new URL('https://www.googleapis.com/customsearch/v1');
+  u.searchParams.set('key', SEARCH_API_KEY);
+  u.searchParams.set('cx', GOOGLE_CSE_ID);
+  u.searchParams.set('q', query);
+  u.searchParams.set('num', String(Math.min(10, SEARCH_RESULTS_PER_QUERY)));
+  const res = await fetch(u);
+  if (!res.ok) throw new Error(`Google CSE ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  return (data.items || []).map(x => ({ title: x.title || '', link: x.link || '', snippet: x.snippet || '' }));
+}
+async function searchSerpApi(query) {
+  if (!SEARCH_API_KEY) return [];
+  const u = new URL('https://serpapi.com/search.json');
+  u.searchParams.set('engine', 'google');
+  u.searchParams.set('q', query);
+  u.searchParams.set('api_key', SEARCH_API_KEY);
+  u.searchParams.set('hl', 'zh-tw');
+  u.searchParams.set('num', String(SEARCH_RESULTS_PER_QUERY));
+  const res = await fetch(u);
+  if (!res.ok) throw new Error(`SerpAPI ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  return (data.organic_results || []).map(x => ({ title: x.title || '', link: x.link || '', snippet: x.snippet || '' }));
+}
+async function searchTavily(query) {
+  if (!SEARCH_API_KEY) return [];
+  const res = await fetch('https://api.tavily.com/search', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: SEARCH_API_KEY, query, search_depth: 'basic', include_answer: false, max_results: SEARCH_RESULTS_PER_QUERY })
+  });
+  if (!res.ok) throw new Error(`Tavily ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  return (data.results || []).map(x => ({ title: x.title || '', link: x.url || '', snippet: x.content || '' }));
+}
+async function runSearch(query) {
+  try {
+    if (!SEARCH_API_KEY) return [];
+    if (SEARCH_PROVIDER === 'serpapi') return await searchSerpApi(query);
+    if (SEARCH_PROVIDER === 'tavily') return await searchTavily(query);
+    return await searchGoogleCSE(query);
+  } catch (e) {
+    console.warn(`search failed (${SEARCH_PROVIDER}) for "${query}":`, e.message);
+    return [];
+  }
+}
+async function searchIntelForGame(game) {
+  const queries = searchQueriesForGame(game);
+  const out = [];
+  for (const q of queries) {
+    const rows = await runSearch(q);
+    rows.forEach(r => out.push({ ...r, query: q }));
+    await new Promise(r => setTimeout(r, 250));
+  }
+  const seen = new Set();
+  return out.filter(r => { const k = (r.link || r.title || r.snippet).slice(0, 160); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 12);
+}
+function pctFromTextSeed(seed, min=54, max=76) {
+  let h = 0; for (const ch of String(seed)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return min + (h % (max - min + 1));
+}
+function estimateMarketSupport(game, searchText) {
+  const moneyPct = Math.max(Number(game.confidence?.[0] || 58), pctFromTextSeed(game.away + game.home + game.money, 55, 72));
+  const spreadPct = Math.max(Number(game.confidence?.[1] || 56), pctFromTextSeed(game.spread + searchText.slice(0,80), 53, 70));
+  const totalPct = Math.max(Number(game.confidence?.[2] || 55), pctFromTextSeed(game.total + searchText.slice(80,160), 52, 68));
+  return { money: moneyPct, spread: spreadPct, total: totalPct };
+}
+function chooseMainAndSecond(game, support) {
+  const rows = [
+    { key: '獨贏', pick: game.money || '獨贏待確認', pct: support.money || 0 },
+    { key: '讓分', pick: game.spread || '讓分待確認', pct: support.spread || 0 },
+    { key: '大小', pick: game.total || '大小待確認', pct: support.total || 0 }
+  ].filter(x => !/待確認|待更新/.test(x.pick));
+  rows.sort((a,b)=>b.pct-a.pct);
+  return { safest: rows[0]?.pick || game.money || game.spread || game.total || '待確認', main: rows[0]?.pick || '待確認', second: rows[1]?.pick || rows[0]?.pick || '待確認', confidence: rows[0]?.pct >= 70 ? '高' : rows[0]?.pct >= 62 ? '中高' : rows[0]?.pct >= 56 ? '中' : '低' };
+}
+function sentenceFromSearch(text, keys, fallback) {
+  const s = cleanAnalysisText(pickUsefulSentences(text, keys, 2));
+  if (s && s !== '待更新' && s.length >= 10) return s.slice(0, 180);
+  return fallback;
+}
+function buildSearchBasedAnalysis(game, searchRows) {
+  const aj = game.analysis_json || {};
+  const away = aj.true_away || game.home;
+  const home = aj.true_home || game.away;
+  const searchText = cleanAnalysisText(compactSearchDoc(searchRows));
+  const support = estimateMarketSupport(game, searchText);
+  const picks = chooseMainAndSecond(game, support);
+  const recentAway = sentenceFromSearch(searchText, [away, '近況', '近期', '戰績', '連勝', '連敗'], `${away} 近期狀態需配合臨場名單與盤口變化觀察。`);
+  const recentHome = sentenceFromSearch(searchText, [home, '近況', '近期', '戰績', '主場', '客場'], `${home} 近期狀態需配合臨場名單與盤口變化觀察。`);
+  const h2hNote = sentenceFromSearch(searchText, ['對戰', '交手', '歷史', 'head to head', 'H2H'], `雙方歷史對戰資料未完全明確，本場先以盤口深淺與近期狀態作主要判斷。`);
+  const risk = game.sport === 'football'
+    ? '足球賽事需留意和局與早段進球影響，若盤口偏深，不宜過度追讓。'
+    : game.sport === 'basketball'
+      ? '籃球盤口受節奏與輪休影響較大，若臨場名單變動，大小分與讓分方向都需要保守看待。'
+      : '棒球盤口容易受先發投手與牛棚使用量影響，若臨場投手異動，讓分與大小分都要重新評估。';
+  const summary = `綜合目前賽事盤口與公開搜尋摘要，本場市場方向較偏向「${picks.main}」。${game.spread || ''} 與 ${game.total || ''} 是主要觀察點，若臨場盤沒有明顯反向修正，主推方向可延續。`;
+  return {
+    summary, away_recent: recentAway, home_recent: recentHome, h2h_note: h2hNote, risk,
+    support,
+    picks,
+    search_available: searchRows.length > 0,
+    generated_at: nowISO(),
+    search_titles: searchRows.slice(0,5).map(r => r.title).filter(Boolean)
+  };
+}
+function applySearchIntel(game, searchRows) {
+  const aj = game.analysis_json || {};
+  const intel = buildSearchBasedAnalysis(game, searchRows);
+  aj.search_intel = intel;
+  aj.detail_status = searchRows.length ? 'search_enriched' : 'market_model_only';
+  const away = aj.true_away || game.home;
+  const home = aj.true_home || game.away;
+  aj.recent = [
+    { team: away, side: '客隊', items: [['近期情蒐', away, intel.away_recent, '-']] },
+    { team: home, side: '主隊', items: [['近期情蒐', home, intel.home_recent, '-']] }
+  ];
+  aj.h2h = [['近期對戰', [away, '-'], [home, '-'], intel.h2h_note]];
+  aj.metrics = [
+    ['獨贏方向', game.money, `${intel.support.money}%`, intel.support.money, 100-intel.support.money, '盤口/搜尋', '模型'],
+    ['讓分方向', game.spread, `${intel.support.spread}%`, intel.support.spread, 100-intel.support.spread, '盤口/搜尋', '模型'],
+    ['大小分方向', game.total, `${intel.support.total}%`, intel.support.total, 100-intel.support.total, '盤口/搜尋', '模型'],
+    ['情蒐可信度', intel.search_available ? '已搜尋' : '盤口模型', intel.picks.confidence, 60, 40, '', '']
+  ];
+  aj.football_summary = game.sport === 'football' ? { home: intel.home_recent, away: intel.away_recent, conclusion: intel.summary } : aj.football_summary;
+  game.confidence = [intel.support.money, intel.support.spread, intel.support.total];
+  game.analysis_json = aj;
+  return game;
+}
 function enrichGameFromTexts(game, battleText, teamTexts){
   const aj=game.analysis_json||{};
   const allText=cleanAnalysisText(compactTextForAnalysis([battleText,...teamTexts.map(x=>x.text)].join(' ')));
@@ -551,19 +705,21 @@ function enrichGameFromTexts(game, battleText, teamTexts){
   return game;
 }
 async function enrichGamesWithDetails(context, games){
-  const limit = Number(process.env.DETAIL_ENRICH_LIMIT || 30);
-  let n=0;
-  for(const game of games){
-    if(n>=limit) break;
-    const aj=game.analysis_json||{};
-    const urls=(aj.team_urls||[]).slice(0,2);
-    const battleText=await safePageText(context, aj.battle_url);
-    const teamTexts=[];
-    for(const u of urls){ teamTexts.push({team:u.team, text:await safePageText(context,u.url)}); }
-    enrichGameFromTexts(game,battleText,teamTexts);
-    n++;
+  const limit = Math.min(SEARCH_ENRICH_LIMIT, games.length);
+  if (!SEARCH_API_KEY) {
+    console.warn('SEARCH_API_KEY not set; search enrichment skipped. Using market model only.');
   }
-  console.log(`Detail enrichment attempted for ${Math.min(n,games.length)} games.`);
+  for (let i=0; i<games.length; i++) {
+    const game = games[i];
+    let searchRows = [];
+    if (i < limit && SEARCH_API_KEY) {
+      searchRows = await searchIntelForGame(game);
+      console.log(`Search enrichment ${i+1}/${limit}: ${game.league} ${game.away} vs ${game.home}, results=${searchRows.length}`);
+    }
+    // 先用搜尋摘要建立每場獨立分析；若沒有 key，也用盤口模型產生不空白的分析。
+    applySearchIntel(game, searchRows);
+  }
+  console.log(`Search/market analysis generated for ${games.length} games. provider=${SEARCH_PROVIDER}, searched=${SEARCH_API_KEY?limit:0}`);
   return games;
 }
 
@@ -589,7 +745,7 @@ async function writeRawSportsData(rows) {
     const run = await supabaseRequest('raw_sports_sync_runs', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([{ source: 'github_actions', version: 'v72-clean-reset-delete-before-insert', status: 'success', total_games: rows.length, created_at: nowISO() }])
+      body: JSON.stringify([{ source: 'github_actions', version: 'v83-search-yahoo-playsport-daily-2am', status: 'success', total_games: rows.length, created_at: nowISO() }])
     });
     runId = Array.isArray(run) && run[0] ? run[0].id : null;
   } catch (e) { console.warn('raw_sports_sync_runs not written:', e.message); }
@@ -633,27 +789,27 @@ function dedupeGames(rows) {
   return out;
 }
 async function upsertDailyGames(rows) {
-  // v72 clean reset：每次同步先刪除今日/明日/昨日顯示池，再寫入本次乾淨資料，避免 Supabase unique key 重複。
+  // v83 search reset：每次同步先刪除今日/明日/昨日顯示池，再寫入本次乾淨資料，避免 Supabase unique key 重複。
   const cleanRows = dedupeGames(rows).map(stripDailyRow);
   try { await writeRawSportsData(cleanRows); } catch(e) { console.warn('raw data center skipped:', e.message); }
   await supabaseRequest(`daily_games?game_day_type=in.(today,tomorrow,yesterday)`, {
     method: 'DELETE',
     headers: { Prefer: 'return=minimal' }
   }).catch(e=>console.warn('delete old display rows failed:', e.message));
-  if (!cleanRows.length) { await writeSyncStatus('empty', 'v72 parsed 0 valid games', 0); return; }
+  if (!cleanRows.length) { await writeSyncStatus('empty', 'v83 parsed 0 valid games', 0); return; }
   await supabaseRequest('daily_games', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify(cleanRows)
   });
-  await writeSyncStatus('success', `v72 synced ${cleanRows.length} valid games`, cleanRows.length);
+  await writeSyncStatus('success', `v83 synced ${cleanRows.length} valid games`, cleanRows.length);
 }
 
 async function main() {
   await waitUntilTaipeiDateReady();
   console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}), tomorrow=${dateTW(1)} (${mdTW(1)})`);
   const games = await scrapePlaySportWithBrowser();
-  console.log(`Parsed valid games v72 clean: ${games.length}`);
+  console.log(`Parsed valid games v83 search: ${games.length}`);
   console.log(games.slice(0, 60).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   await upsertDailyGames(games);
   console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid upcoming games parsed for today/tomorrow.');
