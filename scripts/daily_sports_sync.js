@@ -144,6 +144,38 @@ function findMarketCell(group, cls, side) {
   }
   return null;
 }
+
+function statRows(labels){ return labels.map(k => [k, '待更新']); }
+function defaultPitcherStats(){ return statRows(['ERA','WHIP','勝投','敗投','近況']); }
+function defaultCoreStats(sport){
+  if(sport === 'basketball') return statRows(['場均得分','場均失分','命中率','籃板','近況']);
+  if(sport === 'football') return statRows(['近5場進球','近5場失球','控球率','主客場','近況']);
+  return statRows(['近況']);
+}
+function defaultMetrics(away, home, sport){
+  if(sport === 'baseball') return [
+    ['打擊率','待更新','待更新',50,50,'',''],['場均得分','待更新','待更新',50,50,'',''],['團隊防禦率','待更新','待更新',50,50,'',''],['牛棚WHIP','待更新','待更新',50,50,'',''],['近五場','待更新','待更新',50,50,'','']
+  ];
+  if(sport === 'basketball') return [
+    ['場均得分','待更新','待更新',50,50,'',''],['場均失分','待更新','待更新',50,50,'',''],['近五場','待更新','待更新',50,50,'',''],['主客場表現','待更新','待更新',50,50,'',''],['大小分趨勢','待更新','待更新',50,50,'','']
+  ];
+  return [
+    ['近五場進球','待更新','待更新',50,50,'',''],['近五場失球','待更新','待更新',50,50,'',''],['主客場表現','待更新','待更新',50,50,'',''],['歷史對戰','待更新','待更新',50,50,'',''],['盤口適配','待更新','待更新',50,50,'','']
+  ];
+}
+function defaultInjuries(away, home, sport){
+  if(sport === 'baseball') return [[away,'傷兵名單','待更新',''],[home,'傷兵名單','待更新','']];
+  return [[away,'傷停狀況','待更新',''],[home,'傷停狀況','待更新','']];
+}
+function defaultH2H(away, home){ return [['待更新',[away,'-'],[home,'-'],'待更新']]; }
+function defaultRecent(away, home){ return [
+  {team:away,side:'客隊',items:[['近況',away,'待更新','-']]},
+  {team:home,side:'主隊',items:[['近況',home,'待更新','-']]}
+]; }
+function cleanAnalysisText(s=''){
+  return String(s||'').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'').replace(/\s+/g,' ').trim();
+}
+
 function convertGroupToGame(group, target, sourceUrl) {
   const allText = group.rows.map(r => r.text).join(' ');
   const time = extractTime(allText);
@@ -171,12 +203,12 @@ function convertGroupToGame(group, target, sourceUrl) {
     : target.league;
 
   const starters = target.sport === 'baseball' ? [
-    { team: homeTeam, name: homeDetail || '先發待公布', role: '主隊先發', stats: [['ERA', '待更新'], ['WHIP', '待更新'], ['勝投', '待更新'], ['敗投', '待更新'], ['近況', '待更新']] },
-    { team: awayTeam, name: awayDetail || '先發待公布', role: '客隊先發', stats: [['ERA', '待更新'], ['WHIP', '待更新'], ['勝投', '待更新'], ['敗投', '待更新'], ['近況', '待更新']] }
+    { team: homeTeam, name: homeDetail || '先發待公布', role: '主隊先發', stats: [...defaultPitcherStats()] },
+    { team: awayTeam, name: awayDetail || '先發待公布', role: '客隊先發', stats: [...defaultPitcherStats()] }
   ] : [];
   const corePlayers = target.sport !== 'baseball' ? [
-    { team: homeTeam, name: '核心隊員待同步', role: '主隊', award: '依 Yahoo / SofaScore 後續補強近期狀態、傷兵與主客場數據。' },
-    { team: awayTeam, name: '核心隊員待同步', role: '客隊', award: '盤口已先依玩運彩運彩盤整理，不含賠率。' }
+    { team: homeTeam, name: '核心球員待更新', role: '主隊', award: '近期狀態、傷兵與主客場數據待更新', stats: defaultCoreStats(target.sport) },
+    { team: awayTeam, name: '核心球員待更新', role: '客隊', award: '近期狀態、傷兵與主客場數據待更新', stats: defaultCoreStats(target.sport) }
   ] : [];
 
   return {
@@ -184,15 +216,20 @@ function convertGroupToGame(group, target, sourceUrl) {
     // 前台用 away vs home 顯示；依需求主隊放第一個，故欄位反向存放。
     away: homeTeam, home: awayTeam,
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
-    source_url: sourceUrl, source_name: '玩運彩', active: true, updated_at: nowISO(),
+    source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v60-clean-mlb-team-filter', true_away: awayTeam, true_home: homeTeam,
+      parser_version: 'v61-data-center', true_away: awayTeam, true_home: homeTeam,
       display_order: 'home_first', competition, sport_label: target.label,
       starters, core_players: corePlayers,
+      metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
+      injuries: defaultInjuries(awayTeam, homeTeam, target.sport),
+      h2h: defaultH2H(awayTeam, homeTeam),
+      recent: defaultRecent(awayTeam, homeTeam),
+      detail_status: 'pending',
       odds_hidden: true,
       odds: { spread_away: spreadAway, spread_home: spreadHome, money_away: moneyAway, money_home: moneyHome, money_draw: moneyDraw, total_over: totalOver, total_under: totalUnder },
-      source_note: 'v60 依玩運彩表格 class 解析：非足球只取右側運彩盤；賠率僅做內部信心值，不顯示在前台；足球不讓分視為獨贏；MLB 會排除含比分/排名代碼的錯誤隊名。',
-      data_sources: target.sport === 'football' ? ['玩運彩預測賽事', '台灣運彩盤口', 'SofaScore'] : ['玩運彩預測賽事', 'Yahoo奇摩運動']
+      source_note: '',
+      data_sources: []
     }
   };
 }
@@ -274,10 +311,10 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'playsport-v60', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v61-data-center', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
-async function archiveTodayToYesterday(reason = 'v60 parsed 0 valid games') {
+async function archiveTodayToYesterday(reason = 'v61 parsed 0 valid games') {
   const today = dateTW(0), yesterday = dateTW(-1);
   let rows = [];
   try { rows = await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true&select=*`) || []; } catch(e) { console.warn(e.message); }
@@ -289,10 +326,10 @@ async function archiveTodayToYesterday(reason = 'v60 parsed 0 valid games') {
 }
 async function upsertDailyGames(rows) {
   const today = dateTW(0);
-  if (!rows.length) { await archiveTodayToYesterday('v60 parsed 0 valid games'); return; }
+  if (!rows.length) { await archiveTodayToYesterday('v61 parsed 0 valid games'); return; }
   await supabaseRequest(`daily_games?game_date=eq.${today}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() }) });
   await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
-  await writeSyncStatus('success', `v60 synced ${rows.length} valid games`, rows.length);
+  await writeSyncStatus('success', `v61 synced ${rows.length} valid games`, rows.length);
 }
 async function main() {
   const games = await scrapePlaySportWithBrowser();

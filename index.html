@@ -709,7 +709,8 @@ function renderLeagues(){
 function renderGames(){
   const leagueName=leagues[state.sport].find(x=>x[0]===state.league)?.[1]||state.league;
   $('leagueTitle').textContent=leagueName+'｜今日賽事';
-  const list=games[state.league]||games.MLB;
+  const list=games[state.league]||[];
+  if(!list.length){ $('games').innerHTML='<div class="soft rounded-2xl p-6 text-center text-slate-400 font-black">目前沒有抓到此分類賽事；資料中心會每小時重新整理。</div>'; return; }
   $('games').innerHTML=list.map((g,i)=>`<article class="soft rounded-2xl p-3"><div class="grid xl:grid-cols-[minmax(0,1fr)_320px_240px] gap-3 items-center"><div class="min-w-0"><div class="flex items-center gap-2 text-xs text-slate-500 font-black"><span>${g.time}</span><span>•</span><span>${leagueName}</span></div><h3 class="text-lg font-black truncate mt-1">${g.away} vs ${g.home}</h3></div><div class="grid grid-cols-3 gap-2">${marketMini('獨贏',g.money,'emerald')}${marketMini('讓分',g.spread,'blue')}${marketMini('大小',g.total,'pink')}</div><div class="action-row"><button onclick="openGame(${i},'data')" class="rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black px-3 py-3">查看數據</button><button onclick="openGame(${i},'board')" class="rounded-xl border border-slate-700 bg-slate-950 text-slate-100 font-black px-3 py-3">留言板</button></div></div></article>`).join('');
 }
 function marketMini(label,val,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-xl border ${cls} p-2"><div class="text-[11px] font-black">${label}</div><div class="market mt-1">${val}</div></div>`; }
@@ -719,16 +720,21 @@ function buildGameData(g){
   const base=data[g.sport]||data.baseball;
   const aj=g.analysis_json||{};
   const copy=JSON.parse(JSON.stringify(base));
+  const cleanStats=(arr,fallback)=>Array.isArray(arr)&&arr.length?arr.filter(s=>!['來源','數據來源','資料來源','狀態','補強'].includes(String(s[0]||''))).map(s=>[s[0],String(s[1]||'待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'').trim()||'待更新']):fallback;
   if(Array.isArray(aj.starters) && aj.starters.length){
     copy.topTitle='雙方先發';
-    copy.top=aj.starters.map(x=>({team:x.team||'',name:x.name||'先發待公布',role:x.role||'先發',stats:Array.isArray(x.stats)&&x.stats.length?x.stats.filter(s=>!['來源','數據來源','資料來源','狀態'].includes(String(s[0]||''))):[["ERA","待更新"],["WHIP","待更新"],["勝投","待更新"],["敗投","待更新"],["近況","待更新"]]}));
+    copy.top=aj.starters.map(x=>({team:x.team||'',name:x.name||'先發待公布',role:x.role||'先發',stats:cleanStats(x.stats,[["ERA","待更新"],["WHIP","待更新"],["勝投","待更新"],["敗投","待更新"],["近況","待更新"]])}));
   }
   if(Array.isArray(aj.core_players) && aj.core_players.length){
-    copy.topTitle='核心隊員';
-    const players=aj.core_players.map(x=>({team:x.team||'',name:x.name||'核心隊員待同步',role:x.role||'隊伍資料',award:x.award||'資料來源同步中'}));
+    copy.topTitle='核心球員數據';
+    const players=aj.core_players.map(x=>({team:x.team||'',name:String(x.name||'核心球員待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩/g,''),role:x.role||'隊伍資料',award:String(x.award||'近期狀態待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,''),stats:cleanStats(x.stats,[["近況","待更新"],["主客場","待更新"],["傷停","待更新"]])}));
     if(g.sport==='football') copy.top=[...players,...players].slice(0,6);
-    else copy.top=players.map(x=>({...x,stats:[["來源","玩運彩"],["補強","Yahoo/SofaScore"]]}));
+    else copy.top=players;
   }
+  if(Array.isArray(aj.metrics)&&aj.metrics.length) copy.metrics=aj.metrics;
+  if(Array.isArray(aj.injuries)&&aj.injuries.length) copy.injuries=aj.injuries;
+  if(Array.isArray(aj.h2h)&&aj.h2h.length) copy.h2h=aj.h2h;
+  if(Array.isArray(aj.recent)&&aj.recent.length) copy.recent=aj.recent;
   return copy;
 }
 function gameDisplayTitle(g){ return `${g.away} vs ${g.home}`; }
@@ -2849,7 +2855,7 @@ function v52NormalizeDailyGame(r){
     sport:r.sport || 'baseball',
     conf:Array.isArray(r.confidence) ? r.confidence : [60,60,60],
     source_url:r.source_url || '',
-    source_name:r.source_name || '每日同步',
+    source_name:'',
     analysis_json:r.analysis_json || {}
   };
 }
@@ -2877,7 +2883,7 @@ async function v52LoadDailyGames(){
       grouped[league].push(v52NormalizeDailyGame(r));
     });
     Object.keys(grouped).forEach(k=>{ games[k]=grouped[k]; });
-    // v59: 聯盟按鈕固定顯示，不再因為某一聯盟暫時沒資料就消失。
+    // v61: 聯盟按鈕固定顯示，不再因為某一聯盟暫時沒資料就消失。
     // 這樣 MLB / 日本職棒 / 中華職棒 / 韓國職棒 都會一直在棒球分類。
     leagues.baseball=[['MLB','MLB'],['NPB','日本職棒'],['CPBL','中華職棒'],['KBO','韓國職棒']];
     leagues.basketball=[['NBA','NBA'],['WNBA','WNBA'],['CBA','中國職籃']];
