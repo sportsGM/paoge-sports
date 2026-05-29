@@ -4,17 +4,20 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
 
-const BASE_URL = 'https://www.playsport.cc/predict/games?allianceid=1';
+const BASE_URL = 'https://www.playsport.cc/predict/games';
 const TARGETS = [
-  { label: 'MLB', sport: 'baseball', league: 'MLB' },
-  { label: '日本職棒', sport: 'baseball', league: 'NPB' },
-  { label: '中華職棒', sport: 'baseball', league: 'CPBL' },
-  { label: '韓國職棒', sport: 'baseball', league: 'KBO' },
-  { label: 'NBA', sport: 'basketball', league: 'NBA' },
-  { label: 'WNBA', sport: 'basketball', league: 'WNBA' },
-  { label: '中國職籃', sport: 'basketball', league: 'CBA' },
-  { label: '足球', sport: 'football', league: '足球' }
+  { allianceId: 1, label: 'MLB', sport: 'baseball', league: 'MLB' },
+  { allianceId: 2, label: '日本職棒', sport: 'baseball', league: 'NPB' },
+  { allianceId: 6, label: '中華職棒', sport: 'baseball', league: 'CPBL' },
+  { allianceId: 9, label: '韓國職棒', sport: 'baseball', league: 'KBO' },
+  { allianceId: 3, label: 'NBA', sport: 'basketball', league: 'NBA' },
+  { allianceId: 7, label: 'WNBA', sport: 'basketball', league: 'WNBA' },
+  { allianceId: 94, label: '中國職籃', sport: 'basketball', league: 'CBA' },
+  { allianceId: 4, label: '足球', sport: 'football', league: '足球' }
 ];
+function playSportUrl(target, dayType) {
+  return `${BASE_URL}?allianceid=${target.allianceId}&gameday=${dayType}`;
+}
 
 function taipeiParts() {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -200,6 +203,15 @@ function defaultRecent(away, home){ return [
 function cleanAnalysisText(s=''){
   return String(s||'').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'').replace(/\s+/g,' ').trim();
 }
+function hasFinishedScore(group) {
+  // 玩運彩今日頁已完賽常會在 scores 欄位顯示兩邊比分，例如 7 V.S. 1。
+  // 只要今日頁出現完整比分，就視為 finished，不放到可預測列表。
+  return group.rows.flatMap(r => r.cells).some(c => {
+    if (!String(c.cls || '').includes('scores')) return false;
+    const nums = String(c.text || '').match(/\b\d+\b/g) || [];
+    return /V\.?S\.?/i.test(String(c.text || '')) && nums.length >= 2;
+  });
+}
 
 function convertGroupToGame(group, target, sourceUrl) {
   const allText = group.rows.map(r => r.text).join(' ');
@@ -243,7 +255,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v65-today-tomorrow-games', true_away: awayTeam, true_home: homeTeam,
+      parser_version: 'v66-league-url-today-tomorrow', true_away: awayTeam, true_home: homeTeam,
       display_order: 'home_first', competition, sport_label: target.label,
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -316,7 +328,8 @@ async function extractGroups(page) {
     return groups.map(g => {
       const text = g.rows.map(r=>r.text).join(' ');
       const green = g.rows.flatMap(r=>r.cells).some(c => /rgb\(0,\s*128,\s*0\)|rgb\(34,\s*197,\s*94\)|green/i.test(c.color || '') && /完|結束|終了|已/.test(c.text || ''));
-      return { ...g, finished: green || /已完賽|完賽|比賽結束|賽事結束|終場|終了|Final/i.test(text) };
+      const scoreFinished = g.rows.flatMap(r => r.cells).some(c => String(c.cls || '').includes('scores') && /V\.?S\.?/i.test(c.text || '') && ((c.text || '').match(/\b\d+\b/g) || []).length >= 2);
+      return { ...g, finished: green || scoreFinished || /已完賽|完賽|比賽結束|賽事結束|終場|終了|Final/i.test(text) };
     });
   });
 }
@@ -325,24 +338,23 @@ async function scrapePlaySportWithBrowser() {
   const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36' });
   const games = [];
   const dayPlans = [
-    { type: 'today', label: '今日賽事', offset: 0, url: `${BASE_URL}&gameday=today` },
-    { type: 'tomorrow', label: '明日賽事', offset: 1, url: `${BASE_URL}&gameday=tomorrow` }
+    { type: 'today', label: '今日賽事', offset: 0 },
+    { type: 'tomorrow', label: '明日賽事', offset: 1 }
   ];
   try {
     for (const day of dayPlans) {
       const syncDate = dateTW(day.offset);
-      console.log(`=== ${day.label} / ${syncDate} / ${day.url} ===`);
+      console.log(`=== ${day.label} / ${syncDate} ===`);
       for (const target of TARGETS) {
         const page = await context.newPage();
+        const url = playSportUrl(target, day.type);
         try {
-          console.log(`Opening PlaySport target: ${day.type} ${target.label}`);
-          await page.goto(day.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-          await page.waitForTimeout(2500);
-          await clickAllGames(page);
-          await clickByText(page, target.label);
-          await clickAllGames(page);
-          try { await page.waitForLoadState('networkidle', { timeout: 10000 }); } catch {}
-          await page.waitForTimeout(2000);
+          console.log(`Opening PlaySport target: ${day.type} ${target.label} -> ${url}`);
+          // v66：不再進總頁後找「所有賽事」，直接逐聯盟打開官方網址。
+          // 例如 MLB today = /predict/games?allianceid=1&gameday=today。
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+          try { await page.waitForLoadState('networkidle', { timeout: 12000 }); } catch {}
+          await page.waitForTimeout(1800);
           let groups = await extractGroups(page);
           const totalGroups = groups.length;
           if (day.type === 'today') groups = groups.filter(g => !g.finished);
@@ -353,7 +365,7 @@ async function scrapePlaySportWithBrowser() {
             const g = convertGroupToGame(group, target, page.url());
             if (g) { games.push(g); parsed++; }
           }
-          console.log(`${day.type} ${target.label}: groups=${totalGroups}, finished_skipped=${rejectedFinished}, parsed=${parsed}, game_date=${syncDate}${target.league==='MLB'?' (MLB獨立解析)':target.league==='NBA'?' (NBA獨立解析)':target.sport==='football'?' (足球短版/無核心球員)':''}`);
+          console.log(`${day.type} ${target.label}: url=${url}, groups=${totalGroups}, finished_skipped=${rejectedFinished}, parsed=${parsed}, game_date=${syncDate}${target.league==='MLB'?' (MLB逐聯盟網址解析)':target.league==='NBA'?' (NBA獨立網址解析)':target.sport==='football'?' (足球短版/無核心球員)':''}`);
         } catch(e) { console.warn(`${day.type} ${target.label} scrape failed: ${e.message}`); }
         finally { await page.close().catch(()=>{}); }
       }
@@ -371,22 +383,22 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v65-today-tomorrow', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v66-league-url-today-tomorrow', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 async function upsertDailyGames(rows) {
   const today = dateTW(0), tomorrow = dateTW(1);
-  // v65：不再保留昨日資料；今日與明日各自重抓、各自顯示。
+  // v66：不再保留昨日資料；今日與明日逐聯盟網址各自重抓、各自顯示。
   await supabaseRequest(`daily_games?game_day_type=in.(today,tomorrow)`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() }) }).catch(e=>console.warn('deactivate old today/tomorrow failed:', e.message));
-  if (!rows.length) { await writeSyncStatus('empty', 'v65 parsed 0 valid upcoming games for today/tomorrow', 0); return; }
+  if (!rows.length) { await writeSyncStatus('empty', 'v66 parsed 0 valid upcoming games for today/tomorrow', 0); return; }
   await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
-  await writeSyncStatus('success', `v65 synced ${rows.length} valid upcoming games`, rows.length);
+  await writeSyncStatus('success', `v66 synced ${rows.length} valid upcoming games`, rows.length);
 }
 async function main() {
   await waitUntilTaipeiDateReady();
   console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}), tomorrow=${dateTW(1)} (${mdTW(1)})`);
   const games = await scrapePlaySportWithBrowser();
-  console.log(`Parsed valid games v65: ${games.length}`);
+  console.log(`Parsed valid games v66: ${games.length}`);
   console.log(games.slice(0, 60).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   await upsertDailyGames(games);
   console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid upcoming games parsed for today/tomorrow.');
