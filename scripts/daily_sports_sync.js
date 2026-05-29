@@ -176,7 +176,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '玩運彩', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v58-pitcher-stats-layout', true_away: awayTeam, true_home: homeTeam,
+      parser_version: 'v59-no-demo-fixed-tabs', true_away: awayTeam, true_home: homeTeam,
       display_order: 'home_first', competition, sport_label: target.label,
       starters, core_players: corePlayers,
       odds_hidden: true,
@@ -264,10 +264,10 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'playsport-v57', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'playsport-v59', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
-async function archiveTodayToYesterday(reason = 'v57 parsed 0 valid games') {
+async function archiveTodayToYesterday(reason = 'v59 parsed 0 valid games') {
   const today = dateTW(0), yesterday = dateTW(-1);
   let rows = [];
   try { rows = await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true&select=*`) || []; } catch(e) { console.warn(e.message); }
@@ -279,10 +279,10 @@ async function archiveTodayToYesterday(reason = 'v57 parsed 0 valid games') {
 }
 async function upsertDailyGames(rows) {
   const today = dateTW(0);
-  if (!rows.length) { await archiveTodayToYesterday('v57 parsed 0 valid games'); return; }
+  if (!rows.length) { await archiveTodayToYesterday('v59 parsed 0 valid games'); return; }
   await supabaseRequest(`daily_games?game_date=eq.${today}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() }) });
   await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
-  await writeSyncStatus('success', `v57 synced ${rows.length} valid games`, rows.length);
+  await writeSyncStatus('success', `v59 synced ${rows.length} valid games`, rows.length);
 }
 async function main() {
   const games = await scrapePlaySportWithBrowser();

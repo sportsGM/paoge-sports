@@ -555,14 +555,9 @@ body:not(.vip-user) #modalBody section.grid > div:nth-child(n+2)::after{
 <script>
 const leagues={baseball:[["MLB","MLB"],["NPB","日本職棒"],["CPBL","中華職棒"],["KBO","韓國職棒"]],basketball:[["NBA","NBA"],["WNBA","WNBA"],["CBA","中國職籃"]],football:[["足球","足球"]]};
 const games={
-MLB:[
-{time:"AM 07:40",away:"天使",home:"老虎",money:"老虎勝 ★",spread:"老虎 -1.5",total:"大 8.5 ★",sport:"baseball",conf:[72,62,58]},
-{time:"AM 08:05",away:"太空人",home:"遊騎兵",money:"遊騎兵勝",spread:"遊騎兵 -1.5",total:"小 7.5 ★",sport:"baseball",conf:[64,57,61]},
-{time:"AM 10:10",away:"落磯",home:"道奇",money:"道奇勝 ★",spread:"道奇 -2.5",total:"大 8.5",sport:"baseball",conf:[78,59,55]}],
-CPBL:[{time:"18:35",away:"中信兄弟",home:"味全龍",money:"中信兄弟勝 ★",spread:"中信 -1.5",total:"大 7.5 ★",sport:"baseball",conf:[67,56,60]}],
-NBA:[{time:"08:30",away:"馬刺",home:"雷霆",money:"雷霆勝 ★",spread:"雷霆 -4.5 ★",total:"小 223.5",sport:"basketball",conf:[70,63,56]}],
-ECL:[{time:"AM 03:00",away:"巴列卡諾閃電",home:"水晶宮",money:"水晶宮勝 ★",spread:"水晶宮 -0.5",total:"小 2.5 ★",sport:"football",conf:[66,58,56]}],
-EPL:[{time:"22:00",away:"曼城",home:"切爾西",money:"曼城勝 ★",spread:"曼城 -1",total:"大 2.5",sport:"football",conf:[74,61,57]}]
+MLB:[], NPB:[], CPBL:[], KBO:[],
+NBA:[], WNBA:[], CBA:[],
+足球:[], ECL:[], EPL:[], INT:[]
 };
 const data={
 baseball:{
@@ -2866,7 +2861,7 @@ async function v52LoadDailyGames(){
     });
     if(!rows || !rows.length){
       // v54: 如果今日同步抓不到，不要退回靜態示範賽事，避免前台誤以為有今日盤口。
-      const keys=['MLB','CPBL','NPB','NBA','WNBA','ECL','EPL','INT'];
+      const keys=['MLB','NPB','CPBL','KBO','NBA','WNBA','CBA','足球','ECL','EPL','INT'];
       keys.forEach(k=>{ if(games[k]) games[k]=[]; });
       renderGames();
       const box=document.getElementById('games');
@@ -2882,12 +2877,11 @@ async function v52LoadDailyGames(){
       grouped[league].push(v52NormalizeDailyGame(r));
     });
     Object.keys(grouped).forEach(k=>{ games[k]=grouped[k]; });
-    const availableBaseball=[['MLB','MLB'],['NPB','日本職棒'],['CPBL','中華職棒'],['KBO','韓國職棒']].filter(x=>games[x[0]]?.length);
-    const availableBasketball=[['NBA','NBA'],['WNBA','WNBA'],['CBA','中國職籃']].filter(x=>games[x[0]]?.length);
-    const availableFootball=[['足球','足球'],['ECL','歐協杯'],['EPL','英超'],['INT','國際賽']].filter(x=>games[x[0]]?.length);
-    if(availableBaseball.length) leagues.baseball=availableBaseball;
-    if(availableBasketball.length) leagues.basketball=availableBasketball;
-    if(availableFootball.length) leagues.football=availableFootball;
+    // v59: 聯盟按鈕固定顯示，不再因為某一聯盟暫時沒資料就消失。
+    // 這樣 MLB / 日本職棒 / 中華職棒 / 韓國職棒 都會一直在棒球分類。
+    leagues.baseball=[['MLB','MLB'],['NPB','日本職棒'],['CPBL','中華職棒'],['KBO','韓國職棒']];
+    leagues.basketball=[['NBA','NBA'],['WNBA','WNBA'],['CBA','中國職籃']];
+    leagues.football=[['足球','足球']];
     if(!games[state.league]?.length){
       const first=leagues[state.sport]?.[0]?.[0];
       if(first) state.league=first;
