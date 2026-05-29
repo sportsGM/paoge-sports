@@ -1,4 +1,4 @@
-name: Daily 2AM sports sync v95 no google fallback
+name: Daily 2AM sports sync v97 today tomorrow markets
 
 on:
   schedule:
