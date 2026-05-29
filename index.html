@@ -1997,7 +1997,7 @@ v32RenderHotPicks();
 
 
 <script>
-/* ===== v70: raw data center + league-specific day labels ===== */
+/* ===== v74: raw data center + US league separated day labels ===== */
 let v33DayMode = localStorage.getItem('pgai_day_mode') || 'today';
 let v33HotPickSelected = '';
 function v33DateByMode(mode){
@@ -2009,13 +2009,13 @@ function v33DateByMode(mode){
   return `${y}-${m}-${day}`;
 }
 function v32Today(){ return v33DateByMode(v33DayMode); }
-function v68IsUSShiftLeague(){ return ['MLB','NBA','WNBA'].includes(state && state.league); }
+function v74IsUSShiftLeague(){ return ['MLB','NBA','WNBA'].includes(state && state.league); }
 function v33ModeLabel(){
-  if(v68IsUSShiftLeague()) return v33DayMode==='tomorrow'?'今日賽事':'昨日賽事';
+  if(v74IsUSShiftLeague()) return v33DayMode==='tomorrow'?'今日賽事':'昨日賽事';
   return v33DayMode==='tomorrow'?'明日賽事':'今日賽事';
 }
 function v68DayButtonLabel(mode){
-  if(v68IsUSShiftLeague()) return mode==='tomorrow'?'今日賽事':'昨日賽事';
+  if(v74IsUSShiftLeague()) return mode==='tomorrow'?'今日賽事':'昨日賽事';
   return mode==='tomorrow'?'明日賽事':'今日賽事';
 }
 function v33RenderDaySwitch(){
@@ -2886,13 +2886,13 @@ function v52TodayTW(offsetDays=0){
   }
 }
 function v53DailyGamesDate(){
-  if(typeof v68IsUSShiftLeague==='function' && v68IsUSShiftLeague()) return v52TodayTW(0);
+  if(typeof v74IsUSShiftLeague==='function' && v74IsUSShiftLeague()) return v52TodayTW(0);
   return (typeof v33DayMode!=='undefined' && v33DayMode==='tomorrow') ? v52TodayTW(1) : v52TodayTW(0);
 }
 
 function v65GameDayType(){
   // MLB / NBA / WNBA 因美國時差：按鈕顯示「昨日/今日」；資料源對應 gameday=today/tomorrow。
-  if(v68IsUSShiftLeague()) return (typeof v33DayMode!=='undefined' && v33DayMode==='tomorrow') ? 'today' : 'yesterday';
+  if(v74IsUSShiftLeague()) return (typeof v33DayMode!=='undefined' && v33DayMode==='tomorrow') ? 'today' : 'yesterday';
   return (typeof v33DayMode!=='undefined' && v33DayMode==='tomorrow') ? 'tomorrow' : 'today';
 }
 function v52NormalizeDailyGame(r){
@@ -2913,7 +2913,7 @@ function v52NormalizeDailyGame(r){
 async function v52LoadDailyGames(){
   if(!sbReady()) return;
   try{
-    const statusFilter = (v68IsUSShiftLeague() && v33DayMode==='today') ? '' : '&game_status=eq.upcoming';
+    const statusFilter = (v74IsUSShiftLeague() && v33DayMode==='today') ? '' : '&game_status=eq.upcoming';
     const rows=await sbFetch('daily_games',{
       query:`?game_date=eq.${v53DailyGamesDate()}&game_day_type=eq.${v65GameDayType()}${statusFilter}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=180`
     });
