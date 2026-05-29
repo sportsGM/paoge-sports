@@ -1,8 +1,7 @@
-name: Hourly sports sync v59 v59
+name: Hourly sports sync v60
 
 on:
   schedule:
-    # 每小時自動更新一次；GitHub cron 使用 UTC
     - cron: "7 * * * *"
   workflow_dispatch:
 
@@ -12,17 +11,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
       - name: Install dependencies
         run: |
           npm install
           npx playwright install chromium --with-deps
-
       - name: Run sports sync
         run: npm run sync:sports
         env:
