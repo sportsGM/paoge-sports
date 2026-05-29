@@ -1,1 +1,1 @@
-v112 TODAY_TOMORROW_DIRECT_AI_FOOTBALL_FIX
+v113 MLB safe pitchers + football variation

@@ -329,7 +329,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v108-bettable-finished-filter', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      parser_version: 'v113-mlb-safe-pitchers-football-variation', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
       display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'), market_open: marketOpen,
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -692,19 +692,29 @@ function buildSearchBasedAnalysis(game, searchRows) {
   const support = estimateMarketSupport(game, searchText);
   const picks = chooseMainAndSecond(game, support);
   const hasSearch = searchRows.length > 0;
-  const recentAway = sentenceFromSearch(searchText, [away, '近況', '近期', '戰績', '連勝', '連敗'], `${away} 近期狀態需配合臨場名單與盤口變化觀察。`);
-  const recentHome = sentenceFromSearch(searchText, [home, '近況', '近期', '戰績', '主場', '客場'], `${home} 近期狀態需配合臨場名單與盤口變化觀察。`);
+  const recentAway = game.sport === 'football' ? footballTeamNote(away, '客隊') : sentenceFromSearch(searchText, [away, '近況', '近期', '戰績', '連勝', '連敗'], `${away} 近期狀態需配合臨場名單與盤口變化觀察。`);
+  const recentHome = game.sport === 'football' ? footballTeamNote(home, '主隊') : sentenceFromSearch(searchText, [home, '近況', '近期', '戰績', '主場', '客場'], `${home} 近期狀態需配合臨場名單與盤口變化觀察。`);
   const h2hNote = sentenceFromSearch(searchText, ['對戰', '交手', '歷史', 'head to head', 'H2H'], `雙方歷史對戰資料未完全明確，本場先以盤口深淺與近期狀態作主要判斷。`);
   const marketSeed = `${game.league}|${away}|${home}|${game.money}|${game.spread}|${game.total}|${game.game_time}`;
   const noSpreadAdvice = game.sport === 'football' && /無建議|待確認|未開盤/.test(String(game.spread || ''));
   const spreadText = noSpreadAdvice ? '讓球盤尚未提供明確可用方向' : (game.spread || '讓分盤');
   const moneyText = game.money || '獨贏待確認';
   const totalText = game.total || '大小待確認';
+  const footballTeamNote = (team, side) => pickVariant(`${marketSeed}|${team}|${side}|footballTeamV113`, [
+    `${team} 這邊要先看開局壓迫與防線回收速度，若前 20 分鐘能穩住節奏，${side} 方向會比較有延展空間。`,
+    `${team} 的重點不是單純控球率，而是禁區前沿的推進效率；若臨場陣型偏保守，大小分要比勝負更謹慎。`,
+    `${team} 近期判斷會以攻守轉換速度與定位球防守為主，若早段失球，原本盤口優勢會被明顯削弱。`,
+    `${team} 這場需要觀察邊路突破和反擊品質，若無法製造足夠射門，獨贏方向即使看好也不宜追太深。`,
+    `${team} 的盤口價值取決於臨場名單與主客場節奏，若水位沒有同步支持，建議保留部分空間等開賽前確認。`
+  ]);
   const sportTone = game.sport === 'football'
-    ? pickVariant(marketSeed, [
+    ? pickVariant(marketSeed + '|sportToneV113', [
         `足球盤最怕和局與早段紅黃牌改變節奏，本場若${totalText}偏低，進球效率會比控球率更關鍵。`,
-        `足球賽事要先看盤口是否給出明確讓球空間；若沒有讓球盤，獨贏與大小分會是比較主要的觀察方向。`,
-        `此類足球盤通常要防守上半場節奏過慢，若臨場水位沒有明顯往主隊傾斜，追深盤要保守。`
+        `足球賽事要先看盤口是否給出明確讓球空間；若讓球方向不明，獨贏與大小分會是比較主要的觀察方向。`,
+        `此類足球盤通常要防上半場節奏過慢，若臨場水位沒有明顯往主隊傾斜，追深盤要保守。`,
+        `本場足球盤要把和局風險放進去看，若兩隊前場效率都不穩，大小分比獨贏更容易出現臨場變化。`,
+        `若盤口主要集中在獨贏與大小分，代表市場對讓球差距沒有明確共識，下注時應避免把勝負方向放得太滿。`,
+        `足球臨場最怕陣型改保守，若開賽前總分盤沒有上修，進球期待值就不宜抓得太高。`
       ])
     : game.sport === 'basketball'
       ? pickVariant(marketSeed, [
@@ -728,7 +738,7 @@ function buildSearchBasedAnalysis(game, searchRows) {
     `若只看單一盤容易誤判，${moneyText} 與 ${totalText} 要交叉確認；本場暫以「${picks.main}」作為主推方向。`
   ];
   const searchedLine = hasSearch && searchText.length >= 20 ? ` 已整理到的公開資料會優先影響近況判斷，但精準數字仍以已抓到欄位為準。` : '';
-  const summary = pickVariant(marketSeed + 'summaryV112', summaryPool) + searchedLine;
+  const summary = pickVariant(marketSeed + 'summaryV113', summaryPool) + searchedLine;
   const riskPool = [
     `${sportTone} 若臨場盤口從「${spreadText}」突然改深，${picks.main} 的過盤壓力會提高，建議降低注碼。`,
     `本場最大風險是 ${totalText} 與 ${spreadText} 方向不同步；若臨場兩盤互相打架，就只保留主推。`,
@@ -738,7 +748,7 @@ function buildSearchBasedAnalysis(game, searchRows) {
     `${away} 與 ${home} 若開局節奏和預期不同，${totalText} 會最先受影響，大小分方向要特別保守。`,
     `此場風險不在有沒有方向，而是在盤口是否已經反映過多期待；若水位被拉低，主推價值會被壓縮。`
   ];
-  const risk = pickVariant(marketSeed + 'riskV112', riskPool);
+  const risk = pickVariant(marketSeed + 'riskV113', riskPool);
   return {
     summary, away_recent: recentAway, home_recent: recentHome, h2h_note: h2hNote, risk,
     support,
@@ -1097,7 +1107,10 @@ function applyYahooScoreboardText(game, boardText){
   const away=aj.true_away || game.home;
   const home=aj.true_home || game.away;
   let changed=false;
-  if(game.sport==='baseball' && Array.isArray(aj.starters)){
+  // v113：MLB 不再從整個 Yahoo scoreboard 文字直接抽投手數據。
+  // scoreboard 同一天會有很多場，容易把 A 場投手數據套到 B 場，造成兩邊數字一樣。
+  // MLB 投手數據只使用官方 MLB Stats API 或已通過隊名+時間配對的單場頁。
+  if(game.sport==='baseball' && game.league !== 'MLB' && Array.isArray(aj.starters)){
     aj.starters=aj.starters.map(s=>{
       const found=parseYahooPitcherStatsFromBlock(allText, s.name||'');
       if(found){ changed=true; return {...s, stats:[['ERA',found.ERA],['WHIP',found.WHIP],['勝投',found.勝投],['敗投',found.敗投],['近況',found.近況]]}; }
@@ -1114,7 +1127,7 @@ function applyYahooScoreboardText(game, boardText){
     ]; changed=true;
   }
   // v111：Yahoo 整頁文字抓到的 TEAM MATCHUPS 標題不一定是結構化對戰紀錄，不直接塞入 H2H。
-  if(/TEAM COMPARISON|Team Comparison|Batting Average|Runs Scored|Home Runs|場均得分|命中率/.test(allText)){
+  if(game.league !== 'MLB' && /TEAM COMPARISON|Team Comparison|Batting Average|Runs Scored|Home Runs|場均得分|命中率/.test(allText)){
     const metricNote = safeShortNote(allText, ['TEAM COMPARISON','Batting Average','Runs Scored','Home Runs','場均得分','命中率']);
     if(metricNote!=='待更新'){
       aj.metrics = [
@@ -1141,11 +1154,11 @@ async function fetchJsonUrl(url, options = {}) {
 const MLB_TEAM_IDS = new Map(Object.entries({
   '響尾蛇':109,'亞歷桑那':109,'勇士':144,'亞特蘭大':144,'金鶯':110,'巴爾的摩':110,'紅襪':111,'波士頓':111,
   '小熊':112,'芝加哥小熊':112,'紅人':113,'辛辛那提':113,'守護者':114,'印地安人':114,'克里夫蘭':114,
-  '洛磯':115,'科羅拉多':115,'老虎':116,'底特律':116,'太空人':117,'休士頓':117,'皇家':118,'堪薩斯':118,
+  '洛磯':115,'落磯':115,'科羅拉多':115,'Rockies':115,'Colorado':115,'老虎':116,'底特律':116,'Tigers':116,'Detroit':116,'DET':116,'太空人':117,'休士頓':117,'皇家':118,'堪薩斯':118,
   '道奇':119,'洛杉磯道奇':119,'國民':120,'華盛頓':120,'大都會':121,'紐約大都會':121,'運動家':133,'運動人':133,
-  '海盜':134,'匹茲堡':134,'教士':135,'聖地牙哥':135,'水手':136,'西雅圖':136,'巨人':137,'舊金山':137,
+  '海盜':134,'匹茲堡':134,'教士':135,'聖地牙哥':135,'水手':136,'西雅圖':136,'巨人':137,'舊金山':137,'Giants':137,'San Francisco':137,
   '紅雀':138,'聖路易':138,'光芒':139,'坦帕灣':139,'遊騎兵':140,'德州':140,'藍鳥':141,'多倫多':141,
-  '雙城':142,'明尼蘇達':142,'費城人':143,'費城':143,'白襪':145,'芝加哥白襪':145,'馬林魚':146,'邁阿密':146,
+  '雙城':142,'明尼蘇達':142,'費城人':143,'費城':143,'白襪':145,'芝加哥白襪':145,'White Sox':145,'Chicago White Sox':145,'CWS':145,'馬林魚':146,'邁阿密':146,
   '洋基':147,'紐約洋基':147,'釀酒人':158,'密爾瓦基':158,'天使':108,'洛杉磯天使':108
 }).map(([k,v])=>[k,v]));
 function mlbTeamId(name='') {
@@ -1171,6 +1184,18 @@ async function fetchMlbPitcherSeason(playerId, season) {
     近況: `本季 ${stat.inningsPitched || '-'} 局，${stat.strikeOuts || '-'} 次三振，ERA ${stat.era || '待更新'}，WHIP ${stat.whip || '待更新'}`
   };
 }
+
+function pitcherStatsSignature(stats){
+  if(!stats) return '';
+  return [stats.ERA, stats.WHIP, stats.勝投, stats.敗投].map(v=>String(v||'').trim()).join('|');
+}
+function isSuspiciousSamePitcherStats(aName,bName,aStats,bStats){
+  if(!aStats || !bStats) return false;
+  const sigA=pitcherStatsSignature(aStats), sigB=pitcherStatsSignature(bStats);
+  if(!sigA || sigA.includes('待更新') || sigA !== sigB) return false;
+  return cleanTeamName(aName||'') !== cleanTeamName(bName||'');
+}
+
 function applyPitcherStatsToStarter(starter, stats) {
   if (!starter || !stats) return;
   starter.stats = [
@@ -1297,8 +1322,12 @@ async function enrichMLBOfficialStats(game) {
       fetchMlbTeamStats(homeId, season, 'pitching'),
       fetchMlbTeamStats(awayId, season, 'pitching')
     ]);
-    applyPitcherStatsToStarter(homeStarter, homePStats);
-    applyPitcherStatsToStarter(awayStarter, awayPStats);
+    if (isSuspiciousSamePitcherStats(homePitcher?.fullName, awayPitcher?.fullName, homePStats, awayPStats)) {
+      console.warn(`MLB pitcher stats suspiciously identical for different pitchers: ${homePitcher?.fullName} / ${awayPitcher?.fullName}; keeping pitchers pending to avoid wrong mirrored data.`);
+    } else {
+      applyPitcherStatsToStarter(homeStarter, homePStats);
+      applyPitcherStatsToStarter(awayStarter, awayPStats);
+    }
     const metricRows = [];
     const addMetric = (name, awayVal, homeVal) => {
       if (awayVal == null && homeVal == null) return;
@@ -1445,7 +1474,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v96-fast-interactions-fix', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v113-mlb-safe-pitchers-football-variation', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 
@@ -1483,7 +1512,7 @@ async function writeRawSportsData(rows) {
     const run = await supabaseRequest('raw_sports_sync_runs', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([{ source: 'github_actions', version: 'v87-individual-api-ai', status: 'success', total_games: rows.length, created_at: nowISO() }])
+      body: JSON.stringify([{ source: 'github_actions', version: 'v113-mlb-safe-pitchers-football-variation', status: 'success', total_games: rows.length, created_at: nowISO() }])
     });
     runId = Array.isArray(run) && run[0] ? run[0].id : null;
   } catch (e) { console.warn('raw_sports_sync_runs not written:', e.message); }
@@ -1618,7 +1647,7 @@ async function incrementalDailyGames(rows) {
       }
     }
   }
-  const msg = `v111 incremental: new=${toInsert.length}, odds_changed=${toPatch.length}, skipped=${skipped}, inactive=${inactive}, checked=${incoming.length}`;
+  const msg = `v113 incremental: new=${toInsert.length}, odds_changed=${toPatch.length}, skipped=${skipped}, inactive=${inactive}, checked=${incoming.length}`;
   console.log(msg);
   await writeSyncStatus('success', msg, incoming.length);
 }
