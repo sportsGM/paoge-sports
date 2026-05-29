@@ -849,7 +849,7 @@ function buildGameData(g){
   copy.recent=[];
   const isRealValue=v=>{
     const t=String(v||'').trim();
-    return t && !/待更新|資料整理中|未公布|^-$/.test(t);
+    return t && !/待更新|資料整理中|未公布|^-$|未完全明確|主要判斷|需配合臨場|資料未完|尚未明確/.test(t);
   };
   if(Array.isArray(aj.metrics)&&aj.metrics.length) copy.metrics=aj.metrics.filter(m=>Array.isArray(m)&&m.some(isRealValue));
   if(Array.isArray(aj.injuries)&&aj.injuries.length){

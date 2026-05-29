@@ -16,6 +16,7 @@ const SEARCH_RESULTS_PER_QUERY = Number(process.env.SEARCH_RESULTS_PER_QUERY || 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-nano';
 const API_SPORTS_KEY = process.env.API_SPORTS_KEY || ''; // 選填：日後可接 NBA/WNBA/足球付費資料 API
+const SYNC_MODE = (process.env.SYNC_MODE || 'full').toLowerCase(); // full: 大同步；incremental: 每小時只檢查新增/盤口變動
 
 
 const BASE_URL = 'https://www.playsport.cc/predict/games';
@@ -29,11 +30,12 @@ const TARGETS = [
   { allianceId: 94, label: '中國職籃', sport: 'basketball', league: 'CBA' },
   { allianceId: 4, label: '足球', sport: 'football', league: '足球' }
 ];
-const SHIFT_LEAGUES = new Set(['MLB','NBA','WNBA','足球']);
+const SHIFT_LEAGUES = new Set(['MLB','NBA','WNBA']);
 const US_SHIFT_LEAGUES = SHIFT_LEAGUES;
 const DISPLAY_DAY_TYPES = ['today','tomorrow'];
 function shouldScrapePlaySport(target, dayType) {
-  // MLB / NBA / WNBA / 足球：每日只重新抓 tomorrow；today 由前一次同步的 tomorrow 搬過來，避免同一場重複分析。
+  // MLB / NBA / WNBA：每日只重新抓 tomorrow；today 由前一次同步的 tomorrow 搬過來，避免同一場重複分析。
+  // 足球不套用美國時差搬移；今日=玩運彩 today，明日=玩運彩 tomorrow，兩邊都照實抓。
   if (SHIFT_LEAGUES.has(target.league)) return dayType === 'tomorrow';
   return dayType === 'today' || dayType === 'tomorrow';
 }
@@ -323,7 +325,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v87-individual-api-ai', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      parser_version: 'v108-bettable-finished-filter', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
       display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'), market_open: marketOpen,
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -385,7 +387,20 @@ async function clickTodayDate(page) { return true; }
 async function extractGroups(page) {
   return await page.evaluate(() => {
     const norm = s => String(s || '').replace(/\u00a0/g, ' ').trim();
-    const cellObj = td => { const st = window.getComputedStyle(td); return { text: norm(td.innerText || td.textContent || ''), cls: [...td.classList].join(' '), color: st.color || '', rowspan: Number(td.getAttribute('rowspan') || '1'), colspan: Number(td.getAttribute('colspan') || '1'), links: [...td.querySelectorAll('a')].map(a=>({text:norm(a.innerText||a.textContent||''), href:a.href||''})) }; };
+    const cellObj = td => {
+      const st = window.getComputedStyle(td);
+      // v108：玩運彩可投注盤通常會有 radio / input / label 圓點；已完賽列常只剩文字盤口沒有可點選項。
+      const bettable = !!td.querySelector('input[type="radio"], input[type="checkbox"], label, .radio, .form-check-input, [role="radio"]');
+      return {
+        text: norm(td.innerText || td.textContent || ''),
+        cls: [...td.classList].join(' '),
+        color: st.color || '',
+        rowspan: Number(td.getAttribute('rowspan') || '1'),
+        colspan: Number(td.getAttribute('colspan') || '1'),
+        bettable,
+        links: [...td.querySelectorAll('a')].map(a=>({text:norm(a.innerText||a.textContent||''), href:a.href||''}))
+      };
+    };
     const tables = [...document.querySelectorAll('table.predictgame-table')];
     const table = tables[0] || [...document.querySelectorAll('table')].sort((a,b)=>(b.innerText||'').length-(a.innerText||'').length)[0];
     if (!table) return [];
@@ -402,16 +417,25 @@ async function extractGroups(page) {
       else if (cur && spacer) { groups.push(cur); cur = null; }
     }
     if (cur) groups.push(cur);
-    // 今日頁會包含已完賽賽事，玩運彩常以綠色字或完賽/結束字樣標示；同步時要排除。
+    // 今日頁會包含已完賽賽事。v108 用「比分/完賽字樣 + 沒有可投注圓點」雙重判斷，避免誤刪未開盤但尚未開賽的賽事。
     return groups.map(g => {
       const text = g.rows.map(r=>r.text).join(' ');
-      const green = g.rows.flatMap(r=>r.cells).some(c => /rgb\(0,\s*128,\s*0\)|rgb\(34,\s*197,\s*94\)|green/i.test(c.color || '') && /完|結束|終了|已/.test(c.text || ''));
-      const scoreFinished = g.rows.flatMap(r => r.cells).some(c => String(c.cls || '').includes('scores') && /V\.?S\.?/i.test(c.text || '') && ((c.text || '').match(/\b\d+\b/g) || []).length >= 2);
-      return { ...g, finished: green || scoreFinished || /已完賽|完賽|比賽結束|賽事結束|終場|終了|Final/i.test(text) };
+      const cells = g.rows.flatMap(r=>r.cells);
+      const hasBettable = cells.some(c => c.bettable && (/td-bank-bet|bet|bank/i.test(String(c.cls || '')) || /客|主|大|小|和|讓|受讓/.test(String(c.text || ''))));
+      const green = cells.some(c => /rgb\(0,\s*128,\s*0\)|rgb\(34,\s*197,\s*94\)|green/i.test(c.color || '') && /完|結束|終了|已/.test(c.text || ''));
+      const explicitFinished = /已完賽|完賽|比賽結束|賽事結束|終場|終了|Final/i.test(text);
+      const scoreCellFinished = cells.some(c => String(c.cls || '').includes('scores') && /V\.?S\.?/i.test(c.text || '') && ((c.text || '').match(/\b\d+\b/g) || []).length >= 2);
+      const genericScoreFinished = cells.some(c => {
+        const t = norm(c.text || '').replace(/\s+/g, ' ');
+        return /^\d{1,2}\s*(?:V\.?S\.?|vs)\s*\d{1,2}$/i.test(t);
+      });
+      const hasFinishedSignal = green || explicitFinished || scoreCellFinished || genericScoreFinished;
+      return { ...g, has_bettable_option: hasBettable, finished: hasFinishedSignal && !hasBettable };
     });
   });
 }
-async function scrapePlaySportWithBrowser() {
+async function scrapePlaySportWithBrowser(options = {}) {
+  const skipEnrichment = !!options.skipEnrichment;
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox','--disable-dev-shm-usage'] });
   const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36' });
   const games = [];
@@ -433,7 +457,8 @@ async function scrapePlaySportWithBrowser() {
           await page.waitForTimeout(1500);
           let groups = await extractGroups(page);
           const totalGroups = groups.length;
-          // today 頁可能含已完賽或進行中賽事；列表只顯示仍可參考/有盤口場次。
+          // v108：今日頁所有球類都會移除『已結束且沒有投注選項』的場次；仍可下注、有白色圓點的場次會保留。
+          // 未開盤但尚未開賽的場次不會因為沒有圓點就被刪除，會照規則顯示『未開盤』。
           const shouldSkipFinished = displayDay === 'today';
           if (shouldSkipFinished) groups = groups.filter(g => !g.finished);
           let parsed = 0, rejectedFinished = totalGroups - groups.length;
@@ -456,7 +481,11 @@ async function scrapePlaySportWithBrowser() {
       }
     }
   } finally { }
-  await enrichGamesWithDetails(context, games);
+  if (skipEnrichment) {
+    console.log('Incremental mode: detail enrichment skipped during scrape; only checking new games / odds changes.');
+  } else {
+    await enrichGamesWithDetails(context, games);
+  }
   await context.close().catch(()=>{}); await browser.close().catch(()=>{});
   const map = new Map();
   for (const g of games) { const key = `${g.game_day_type}|${g.game_date}|${g.league}|${g.away}|${g.home}|${g.game_time}`; if (!map.has(key)) map.set(key, g); }
@@ -643,6 +672,14 @@ function sentenceFromSearch(text, keys, fallback) {
   if (s && s !== '待更新' && s.length >= 10) return s.slice(0, 180);
   return fallback;
 }
+function pickVariant(seed, arr) {
+  let h = 0;
+  for (const ch of String(seed || '')) h = (h * 33 + ch.charCodeAt(0)) >>> 0;
+  return arr[h % arr.length];
+}
+function isGenericIntelText(text) {
+  return /未完全明確|需配合臨場|資料整理模型|主要判斷|待更新|未公布|資料未完|尚未明確/.test(String(text || ''));
+}
 function buildSearchBasedAnalysis(game, searchRows) {
   const aj = game.analysis_json || {};
   const away = aj.true_away || game.home;
@@ -650,20 +687,49 @@ function buildSearchBasedAnalysis(game, searchRows) {
   const searchText = cleanAnalysisText(compactSearchDoc(searchRows));
   const support = estimateMarketSupport(game, searchText);
   const picks = chooseMainAndSecond(game, support);
+  const hasSearch = searchRows.length > 0;
   const recentAway = sentenceFromSearch(searchText, [away, '近況', '近期', '戰績', '連勝', '連敗'], `${away} 近期狀態需配合臨場名單與盤口變化觀察。`);
   const recentHome = sentenceFromSearch(searchText, [home, '近況', '近期', '戰績', '主場', '客場'], `${home} 近期狀態需配合臨場名單與盤口變化觀察。`);
   const h2hNote = sentenceFromSearch(searchText, ['對戰', '交手', '歷史', 'head to head', 'H2H'], `雙方歷史對戰資料未完全明確，本場先以盤口深淺與近期狀態作主要判斷。`);
-  const risk = game.sport === 'football'
-    ? '足球賽事需留意和局與早段進球影響，若盤口偏深，不宜過度追讓。'
+  const marketSeed = `${game.league}|${away}|${home}|${game.money}|${game.spread}|${game.total}|${game.game_time}`;
+  const sportTone = game.sport === 'football'
+    ? pickVariant(marketSeed, [
+        `足球盤最怕和局與早段紅黃牌改變節奏，本場若${game.total || '大小盤'}偏低，進球效率會比控球率更關鍵。`,
+        `足球賽事要先看盤口是否願意給讓球空間；若讓分顯示「無建議」，代表獨贏與大小分會是比較主要的觀察方向。`,
+        `此類足球盤通常要防守上半場節奏過慢，若臨場水位沒有明顯往主隊傾斜，追深盤要保守。`
+      ])
     : game.sport === 'basketball'
-      ? '籃球盤口受節奏與輪休影響較大，若臨場名單變動，大小分與讓分方向都需要保守看待。'
-      : '棒球盤口容易受先發投手與牛棚使用量影響，若臨場投手異動，讓分與大小分都要重新評估。';
-  const summary = `綜合目前賽事盤口與公開搜尋摘要，本場市場方向較偏向「${picks.main}」。${game.spread || ''} 與 ${game.total || ''} 是主要觀察點，若臨場盤沒有明顯反向修正，主推方向可延續。`;
+      ? pickVariant(marketSeed, [
+          `籃球盤口受節奏、外線手感與輪休影響很大，讓分與大小分要一起看，不能只看單邊人氣。`,
+          `若大小分盤偏高，代表市場預期回合數不低；臨場若主力名單有變，大小分方向要重新確認。`,
+          `籃球讓分若落在中深盤，強隊不只要贏球，還要避免末節垃圾時間被追分。`
+        ])
+      : pickVariant(marketSeed, [
+          `棒球盤口重點在先發投手、牛棚使用量與近況火力，若臨場投手異動，讓分與大小分都要重新評估。`,
+          `棒球讓分容錯較低，若盤口偏向一方但大小分沒有同步放大，代表市場可能更看重投手壓制。`,
+          `若雙方牛棚近期消耗偏高，後段失分風險會放大，大小分比獨贏更需要臨場確認。`
+        ]);
+  const summary = hasSearch
+    ? `綜合目前賽事盤口與已整理到的公開資料，本場市場方向較偏向「${picks.main}」。${game.spread || ''} 與 ${game.total || ''} 是主要觀察點，若臨場盤沒有明顯反向修正，主推方向可延續。`
+    : pickVariant(marketSeed + 'summary', [
+        `目前以玩運彩已開出的盤口做判斷，本場市場重心偏向「${picks.main}」。${game.spread || '讓分盤'}與${game.total || '大小分'}需要一起觀察，盤口若沒有反向修正，主推方向可延續。`,
+        `這場可先從盤口深淺切入：獨贏方向給出基本傾向，讓分與大小分則決定進場風險。目前模型較支持「${picks.main}」，副推可用「${picks.second}」分散風險。`,
+        `本場沒有使用外部搜尋補強時，會以盤口、聯盟特性與隊伍對位做保守模型判斷。目前較值得關注的是「${picks.main}」，臨場若盤口加深需降低注碼。`,
+        `盤口已開出的情況下，這場可以先看市場是否集中在單邊。模型目前給「${picks.main}」較高權重，但${game.total || '大小分'}仍要留意臨場變動。`
+      ]);
+  const risk = hasSearch
+    ? sportTone
+    : pickVariant(marketSeed + 'risk', [
+        sportTone,
+        `本場最大風險在於臨場盤口與名單資訊仍可能變動，若賽前水位突然反向，原本主推方向要降級看待。`,
+        `若盤口尚未完全穩定，建議避免同時重壓讓分與大小分；主推以單一方向為主，副推只作參考。`,
+        `目前模型分數屬於賽前參考，若開賽前出現傷停、投手或先發異動，必須重新評估過盤機率。`
+      ]);
   return {
     summary, away_recent: recentAway, home_recent: recentHome, h2h_note: h2hNote, risk,
     support,
     picks,
-    search_available: searchRows.length > 0,
+    search_available: hasSearch,
     generated_at: nowISO(),
     search_titles: searchRows.slice(0,5).map(r => r.title).filter(Boolean)
   };
@@ -675,11 +741,19 @@ function applySearchIntel(game, searchRows) {
   aj.detail_status = searchRows.length ? 'search_enriched' : 'market_model_only';
   const away = aj.true_away || game.home;
   const home = aj.true_home || game.away;
-  aj.recent = [
-    { team: away, side: '客隊', items: [['近期情蒐', away, intel.away_recent, '-']] },
-    { team: home, side: '主隊', items: [['近期情蒐', home, intel.home_recent, '-']] }
-  ];
-  aj.h2h = [['近期對戰', [away, '-'], [home, '-'], intel.h2h_note]];
+  if (intel.search_available && !isGenericIntelText(intel.away_recent + intel.home_recent)) {
+    aj.recent = [
+      { team: away, side: '客隊', items: [['近期情蒐', away, intel.away_recent, '-']] },
+      { team: home, side: '主隊', items: [['近期情蒐', home, intel.home_recent, '-']] }
+    ];
+  } else {
+    aj.recent = Array.isArray(aj.recent) ? aj.recent : [];
+  }
+  if (intel.search_available && !isGenericIntelText(intel.h2h_note)) {
+    aj.h2h = [['近期對戰', [away, '-'], [home, '-'], intel.h2h_note]];
+  } else {
+    aj.h2h = Array.isArray(aj.h2h) ? aj.h2h : [];
+  }
   aj.metrics = [
     ['獨贏方向', game.money, `${intel.support.money}%`, intel.support.money, 100-intel.support.money, '盤口/搜尋', '模型'],
     ['讓分方向', game.spread, `${intel.support.spread}%`, intel.support.spread, 100-intel.support.spread, '盤口/搜尋', '模型'],
@@ -1290,7 +1364,7 @@ async function writeRawSportsData(rows) {
 }
 
 async function loadPromotedTomorrowRows() {
-  // MLB / NBA / WNBA / 足球：把前一次同步的明日賽事搬到今日賽事，避免今天再抓一次同場並重複分析。
+  // MLB / NBA / WNBA：把前一次同步的明日賽事搬到今日賽事，避免今天再抓一次同場並重複分析。足球不搬移，明日賽事直接讀 gameday=tomorrow。
   try {
     const rows = await supabaseRequest('daily_games?game_day_type=eq.tomorrow&active=eq.true&select=*&limit=500', { method: 'GET' });
     const picked = Array.isArray(rows) ? rows.filter(r => SHIFT_LEAGUES.has(r.league)) : [];
@@ -1320,6 +1394,96 @@ function dedupeGames(rows) {
   }
   return out;
 }
+
+function gameIdentityKey(row) {
+  return [row.game_day_type, row.sport, row.league, row.game_time, row.home, row.away]
+    .map(v => String(v || '').trim()).join('|');
+}
+function oddsHash(row) {
+  const aj = row.analysis_json || {};
+  const marketOpen = aj.market_open === false ? 'closed' : 'open';
+  return [row.money, row.spread, row.total, marketOpen].map(v => String(v || '').trim()).join('|');
+}
+function eqFilter(col, val) {
+  return `${col}=eq.${encodeURIComponent(String(val ?? ''))}`;
+}
+function dailyGameFilter(row) {
+  return [
+    eqFilter('game_day_type', row.game_day_type),
+    eqFilter('sport', row.sport),
+    eqFilter('league', row.league),
+    eqFilter('game_time', row.game_time),
+    eqFilter('home', row.home),
+    eqFilter('away', row.away)
+  ].join('&');
+}
+async function insertDailyRows(rows) {
+  if (!rows.length) return;
+  const cleanRows = normalizeDailyRowsForInsert(rows.map(stripDailyRow));
+  await supabaseRequest('daily_games', {
+    method: 'POST',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify(cleanRows)
+  });
+}
+async function patchDailyRow(row, patch) {
+  await supabaseRequest(`daily_games?${dailyGameFilter(row)}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify(patch)
+  });
+}
+async function incrementalDailyGames(rows) {
+  // v105：每小時小同步。不整批刪除，不重複分析。
+  // 只處理：新賽事、盤口變動、玩運彩已不存在的 active 賽事。
+  const incoming = dedupeGames(rows).map(stripDailyRow);
+  try { await writeRawSportsData(incoming); } catch(e) { console.warn('raw data center skipped:', e.message); }
+  const existingRows = await supabaseRequest('daily_games?game_day_type=in.(today,tomorrow)&active=eq.true&select=*&limit=1000', { method: 'GET' }).catch(e => {
+    console.warn('load existing daily_games failed, fallback to insert-only:', e.message);
+    return [];
+  });
+  const existingMap = new Map((Array.isArray(existingRows) ? existingRows : []).map(r => [gameIdentityKey(r), r]));
+  const incomingMap = new Map(incoming.map(r => [gameIdentityKey(r), r]));
+
+  const toInsert = [];
+  const toPatch = [];
+  let skipped = 0;
+  for (const row of incoming) {
+    const key = gameIdentityKey(row);
+    const old = existingMap.get(key);
+    const rowHash = oddsHash(row);
+    if (!old) {
+      row.analysis_json = { ...(row.analysis_json || {}), analysis_status: 'new_incremental', odds_hash: rowHash, incremental_checked_at: nowISO() };
+      toInsert.push(row);
+      continue;
+    }
+    const oldHash = old?.analysis_json?.odds_hash || oddsHash(old);
+    if (oldHash !== rowHash || old.money !== row.money || old.spread !== row.spread || old.total !== row.total) {
+      const analysis = { ...(old.analysis_json || row.analysis_json || {}), odds_hash: rowHash, analysis_status: 'odds_changed', odds_changed_at: nowISO(), previous_odds_hash: oldHash };
+      toPatch.push({ row, patch: { money: row.money, spread: row.spread, total: row.total, confidence: row.confidence, game_status: row.game_status || 'upcoming', analysis_json: analysis, updated_at: nowISO(), active: true } });
+    } else {
+      skipped++;
+    }
+  }
+
+  await insertDailyRows(toInsert);
+  for (const item of toPatch) await patchDailyRow(item.row, item.patch).catch(e => console.warn('patch odds changed row failed:', e.message));
+
+  let inactive = 0;
+  if (incoming.length > 0) {
+    for (const [key, old] of existingMap.entries()) {
+      if (!incomingMap.has(key)) {
+        inactive++;
+        await patchDailyRow(old, { active: false, updated_at: nowISO(), analysis_json: { ...(old.analysis_json || {}), inactive_reason: 'not_found_in_latest_playsport_check', inactive_at: nowISO() } })
+          .catch(e => console.warn('mark inactive failed:', e.message));
+      }
+    }
+  }
+  const msg = `v108 incremental: new=${toInsert.length}, odds_changed=${toPatch.length}, skipped=${skipped}, inactive=${inactive}, checked=${incoming.length}`;
+  console.log(msg);
+  await writeSyncStatus('success', msg, incoming.length);
+}
+
 async function upsertDailyGames(rows) {
   // v98：維護今日/明日雙顯示池；同步前先刪除 today/tomorrow 舊資料，再寫入本次乾淨資料。
   // 重點修正：所有 insert 物件使用完全相同 keys，避免 PostgREST: All object keys must match。
@@ -1331,7 +1495,7 @@ async function upsertDailyGames(rows) {
       headers: { Prefer: 'return=minimal' }
     }).catch(e=>console.warn(`delete old ${dayType} rows failed:`, e.message));
   }
-  if (!cleanRowsRaw.length) { await writeSyncStatus('empty', 'v98 parsed 0 valid games', 0); return; }
+  if (!cleanRowsRaw.length) { await writeSyncStatus('empty', 'v108 parsed 0 valid games', 0); return; }
   const cleanRows = normalizeDailyRowsForInsert(cleanRowsRaw);
   await supabaseRequest('daily_games', {
     method: 'POST',
@@ -1343,13 +1507,19 @@ async function upsertDailyGames(rows) {
 
 async function main() {
   await waitUntilTaipeiDateReady();
-  console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}). Today/tomorrow display pools enabled.`);
+  console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}). Today/tomorrow display pools enabled. SYNC_MODE=${SYNC_MODE}`);
   const promoted = await loadPromotedTomorrowRows();
-  const scraped = await scrapePlaySportWithBrowser();
+  const incremental = SYNC_MODE === 'incremental';
+  const scraped = await scrapePlaySportWithBrowser({ skipEnrichment: incremental });
   const games = [...promoted, ...scraped];
-  console.log(`Parsed valid games v98 today/tomorrow: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
+  console.log(`Parsed valid games v107 today/tomorrow: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
-  await upsertDailyGames(games);
-  console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed for today/tomorrow display pools.');
+  if (incremental) {
+    await incrementalDailyGames(games);
+    console.log(games.length ? `Incremental check finished for ${games.length} games.` : 'Incremental check found no games.');
+  } else {
+    await upsertDailyGames(games);
+    console.log(games.length ? `Full sync wrote ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed for today/tomorrow display pools.');
+  }
 }
 main().catch(err => { console.error(err); process.exit(1); });
