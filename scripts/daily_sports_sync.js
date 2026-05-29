@@ -4,13 +4,16 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
 
-// v85：Yahoo scoreboard 批次抓取 + Google 備援版
-// 搜尋 API 找到 Yahoo 奇摩運動 / 玩運彩連結後，會開啟詳情頁抽取投手、近期、對戰、隊伍比較等資訊。
+// v88：MLB 官方 API + CPBL 官方/Yahoo 運動 + AI 統整版
+// 玩運彩只抓賽事與運彩盤口；MLB 官方 Stats API、CPBL 官方網站、Yahoo 運動補雙方數據；OpenAI 可選用來統整所有數據成 AI 分析。
 const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'google').toLowerCase();
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
 const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID || '';
-const SEARCH_ENRICH_LIMIT = Number(process.env.SEARCH_ENRICH_LIMIT || 60);
+const SEARCH_ENRICH_LIMIT = Number(process.env.SEARCH_ENRICH_LIMIT || 30);
 const SEARCH_RESULTS_PER_QUERY = Number(process.env.SEARCH_RESULTS_PER_QUERY || 5);
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-nano';
+const API_SPORTS_KEY = process.env.API_SPORTS_KEY || ''; // 選填：日後可接 NBA/WNBA/足球付費資料 API
 
 
 const BASE_URL = 'https://www.playsport.cc/predict/games';
@@ -25,14 +28,12 @@ const TARGETS = [
   { allianceId: 4, label: '足球', sport: 'football', league: '足球' }
 ];
 const US_SHIFT_LEAGUES = new Set(['MLB','NBA','WNBA']);
-function displayDayForLeague(league, dayType) {
-  if (US_SHIFT_LEAGUES.has(league)) return dayType === 'today' ? 'yesterday' : 'today';
-  return dayType;
+function sourceDayForLeague(league) {
+  // MLB / NBA / WNBA 因美國時差，玩運彩要抓 gameday=tomorrow；其餘聯盟抓 gameday=today。
+  return US_SHIFT_LEAGUES.has(league) ? 'tomorrow' : 'today';
 }
-function displayDayLabelForLeague(league, dayType) {
-  const v = displayDayForLeague(league, dayType);
-  return v === 'yesterday' ? '昨日賽事' : v === 'tomorrow' ? '明日賽事' : '今日賽事';
-}
+function displayDayForLeague() { return 'today'; }
+function displayDayLabelForLeague() { return '今日賽事'; }
 function playSportUrl(target, dayType) {
   return `${BASE_URL}?allianceid=${target.allianceId}&gameday=${dayType}`;
 }
@@ -307,7 +308,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v85-yahoo-scoreboard-batch', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      parser_version: 'v87-individual-api-ai', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
       display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'),
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -399,50 +400,47 @@ async function scrapePlaySportWithBrowser() {
   const browser = await chromium.launch({ headless: true, args: ['--no-sandbox','--disable-dev-shm-usage'] });
   const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36' });
   const games = [];
-  const dayPlans = [
-    { type: 'today', label: '今日賽事', offset: 0 },
-    { type: 'tomorrow', label: '明日賽事', offset: 1 }
-  ];
+  const syncDate = dateTW(0);
   try {
-    for (const day of dayPlans) {
-      const syncDate = dateTW(day.offset);
-      console.log(`=== ${day.label} / ${syncDate} ===`);
-      for (const target of TARGETS) {
-        const page = await context.newPage();
-        const url = playSportUrl(target, day.type);
-        try {
-          console.log(`Opening PlaySport target: ${day.type} ${target.label} -> ${url}`);
-          // v66：不再進總頁後找「所有賽事」，直接逐聯盟打開官方網址。
-          // 例如 MLB today = /predict/games?allianceid=1&gameday=today。
-          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
-          try { await page.waitForLoadState('networkidle', { timeout: 12000 }); } catch {}
-          await page.waitForTimeout(1800);
-          let groups = await extractGroups(page);
-          const totalGroups = groups.length;
-          const storedDayType = displayDayForLeague(target.league, day.type);
-          // MLB / NBA / WNBA：gameday=today 是「昨日賽事」，需保留全部賽果；gameday=tomorrow 是「今日賽事」。
-          // 其他聯盟：今日頁排除已完賽，明日頁保留可預測賽事。
-          const shouldSkipFinished = !US_SHIFT_LEAGUES.has(target.league) && day.type === 'today';
-          if (shouldSkipFinished) groups = groups.filter(g => !g.finished);
-          let parsed = 0, rejectedFinished = totalGroups - groups.length;
-          for (const group of groups) {
-            group.rawDayType = day.type;
-            group.dayType = storedDayType;
-            group.syncDate = syncDate;
-            const g = convertGroupToGame(group, target, page.url());
-            if (g) { g.game_status = group.finished ? 'finished' : 'upcoming'; games.push(g); parsed++; }
+    console.log(`=== 今日賽事單一顯示池 / ${syncDate} ===`);
+    for (const target of TARGETS) {
+      const page = await context.newPage();
+      const sourceDay = sourceDayForLeague(target.league);
+      const url = playSportUrl(target, sourceDay);
+      try {
+        console.log(`Opening PlaySport target: display=today source=${sourceDay} ${target.label} -> ${url}`);
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        try { await page.waitForLoadState('networkidle', { timeout: 12000 }); } catch {}
+        await page.waitForTimeout(1800);
+        let groups = await extractGroups(page);
+        const totalGroups = groups.length;
+        // 只顯示今日可參考場次：非美國時差聯盟在 today 頁要排除已完賽；MLB/NBA/WNBA 讀 tomorrow，通常就是可下注場次。
+        const shouldSkipFinished = sourceDay === 'today';
+        if (shouldSkipFinished) groups = groups.filter(g => !g.finished);
+        let parsed = 0, rejectedFinished = totalGroups - groups.length;
+        for (const group of groups) {
+          group.rawDayType = sourceDay;
+          group.dayType = 'today';
+          group.syncDate = syncDate;
+          const g = convertGroupToGame(group, target, page.url());
+          if (g) {
+            g.game_status = group.finished ? 'finished' : 'upcoming';
+            g.game_day_type = 'today';
+            g.game_date = syncDate;
+            games.push(g);
+            parsed++;
           }
-          console.log(`${day.type} ${target.label} -> ${storedDayType} (${displayDayLabelForLeague(target.league, day.type)}): url=${url}, groups=${totalGroups}, finished_skipped=${rejectedFinished}, parsed=${parsed}, game_date=${syncDate}${US_SHIFT_LEAGUES.has(target.league)?' (美國時差：today=昨日完整賽果 / tomorrow=今日可預測)':target.sport==='football'?' (足球短版/無核心球員)':''}`);
-        } catch(e) { console.warn(`${day.type} ${target.label} scrape failed: ${e.message}`); }
-        finally { await page.close().catch(()=>{}); }
-      }
+        }
+        console.log(`today ${target.label}: source=${sourceDay}, groups=${totalGroups}, finished_skipped=${rejectedFinished}, parsed=${parsed}, game_date=${syncDate}${US_SHIFT_LEAGUES.has(target.league)?' (美國時差聯盟：來源用 tomorrow，但前台統一顯示今日賽事)':''}`);
+      } catch(e) { console.warn(`today ${target.label} scrape failed: ${e.message}`); }
+      finally { await page.close().catch(()=>{}); }
     }
   } finally { }
   await enrichGamesWithDetails(context, games);
   await context.close().catch(()=>{}); await browser.close().catch(()=>{});
   const map = new Map();
   for (const g of games) { const key = `${g.game_day_type}|${g.game_date}|${g.league}|${g.away}|${g.home}|${g.game_time}`; if (!map.has(key)) map.set(key, g); }
-  return [...map.values()].sort((a,b)=>`${a.game_day_type}${a.league}${a.game_time}`.localeCompare(`${b.game_day_type}${b.league}${b.game_time}`));
+  return [...map.values()].sort((a,b)=>`${a.league}${a.game_time}`.localeCompare(`${b.league}${b.game_time}`));
 }
 
 async function safePageText(context, url){
@@ -737,10 +735,16 @@ const YAHOO_SCOREBOARD_URLS = {
   MLB: 'https://tw.sports.yahoo.com/mlb/scoreboard/',
   NBA: 'https://tw.sports.yahoo.com/nba/scoreboard/',
   WNBA: 'https://tw.sports.yahoo.com/wnba/scoreboard/',
-  football: 'https://tw.sports.yahoo.com/soccer/scoreboard/'
+  football: 'https://tw.sports.yahoo.com/soccer/scoreboard/',
+  CPBL: [
+    'https://cpbl.com.tw/standings/season',
+    'https://cpbl.com.tw/stats/toplist',
+    'https://cpbl.com.tw/box'
+  ]
 };
 function yahooLeagueKey(game){
   if(game.league === 'MLB') return 'MLB';
+  if(game.league === 'CPBL') return 'CPBL';
   if(game.league === 'NBA') return 'NBA';
   if(game.league === 'WNBA') return 'WNBA';
   if(game.sport === 'football') return 'football';
@@ -760,24 +764,32 @@ function textContainsTeam(text, team){
   return teamTokens(team).some(tok=>raw.includes(tok.toLowerCase()));
 }
 async function fetchYahooScoreboard(context, key){
-  const url=YAHOO_SCOREBOARD_URLS[key];
-  if(!url) return {url:'', text:'', links:[]};
-  const page=await context.newPage();
-  try{
-    console.log(`Opening Yahoo scoreboard batch: ${key} -> ${url}`);
-    await page.goto(url,{waitUntil:'domcontentloaded',timeout:45000});
-    try{ await page.waitForLoadState('networkidle',{timeout:12000}); }catch{}
-    await page.waitForTimeout(2500);
-    const data=await page.evaluate(()=>{
-      const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
-      const links=[...document.querySelectorAll('a')].map(a=>({text:norm(a.innerText||a.textContent||''), href:a.href||''}))
-        .filter(a=>a.href && /sports\.yahoo\.|tw\.sports\.yahoo\./.test(a.href));
-      return { text: document.body ? document.body.innerText : '', links };
-    });
-    console.log(`Yahoo scoreboard loaded: ${key}, links=${data.links.length}, textLen=${(data.text||'').length}`);
-    return {url, text:data.text||'', links:data.links||[]};
-  }catch(e){ console.warn(`Yahoo scoreboard failed ${key}:`, e.message); return {url, text:'', links:[]}; }
-  finally{ await page.close().catch(()=>{}); }
+  const rawUrls=YAHOO_SCOREBOARD_URLS[key];
+  if(!rawUrls) return {url:'', text:'', links:[]};
+  const urls=Array.isArray(rawUrls) ? rawUrls : [rawUrls];
+  const combined={url:urls.join(' | '), text:'', links:[]};
+  for(const url of urls){
+    const page=await context.newPage();
+    try{
+      console.log(`Opening sports data batch: ${key} -> ${url}`);
+      await page.goto(url,{waitUntil:'domcontentloaded',timeout:45000});
+      try{ await page.waitForLoadState('networkidle',{timeout:12000}); }catch{}
+      await page.waitForTimeout(2500);
+      const data=await page.evaluate(()=>{
+        const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
+        const links=[...document.querySelectorAll('a')].map(a=>({text:norm(a.innerText||a.textContent||''), href:a.href||''}))
+          .filter(a=>a.href && /(sports\.yahoo\.|tw\.sports\.yahoo\.|cpbl\.com\.tw)/.test(a.href));
+        return { text: document.body ? document.body.innerText : '', links };
+      });
+      combined.text += `\n\nURL:${url}\n${data.text||''}`;
+      combined.links.push(...(data.links||[]));
+      console.log(`Sports data page loaded: ${key}, links=${data.links.length}, textLen=${(data.text||'').length}`);
+    }catch(e){ console.warn(`Sports data page failed ${key} ${url}:`, e.message); }
+    finally{ await page.close().catch(()=>{}); }
+    await new Promise(r=>setTimeout(r,350));
+  }
+  console.log(`Sports data batch loaded: ${key}, totalLinks=${combined.links.length}, totalTextLen=${combined.text.length}`);
+  return combined;
 }
 async function buildYahooScoreboardCache(context, games){
   const keys=[...new Set(games.map(yahooLeagueKey).filter(Boolean))];
@@ -814,8 +826,65 @@ function parseYahooPitcherStatsFromBlock(allText, pitcherName){
   }
   return null;
 }
+function extractCPBLTeamLine(allText, team){
+  const area = strictSliceAround(allText, team, 520) || '';
+  if(!area) return '待更新';
+  const compact = cleanAnalysisText(area);
+  const m = compact.match(/(\d{1,3}\s+\d{1,2}-\d{1,2}-\d{1,2}\s+\d(?:\.\d{2,3})?[^\n]{0,120})/);
+  if(m) return m[1].replace(/\s+/g,' ').slice(0,120);
+  return safeShortNote(area, [team, '近十場', '連勝', '連敗', '主場', '客場', '勝率']);
+}
+function extractCPBLPitcherFromToplist(allText, pitcherName){
+  if(!pitcherName || pitcherName === '待更新') return null;
+  const area = strictSliceAround(allText, pitcherName, 280) || '';
+  if(!area) return null;
+  const era = firstStrictNumber(area, [/防禦率ERA\s*[^\d]*(\d+(?:\.\d+)?)/, /防禦率\s*[^\d]*(\d+(?:\.\d+)?)/, /ERA\s*[^\d]*(\d+(?:\.\d+)?)/i]);
+  const wins = firstStrictNumber(area, [/勝投W\s*[^\d]*(\d+)/, /勝投\s*[^\d]*(\d+)/]);
+  const k = firstStrictNumber(area, [/奪三振\s*[^\d]*(\d+)/, /三振\s*[^\d]*(\d+)/]);
+  const stats=[['ERA',era],['WHIP','待更新'],['勝投',wins],['敗投','待更新'],['近況', k !== '待更新' ? `CPBL 官方排行榜可見三振 ${k}，其餘投手細項需賽前頁確認` : 'CPBL 官方資料整理中']];
+  return stats.some(x=>x[1] !== '待更新') ? stats : null;
+}
+function applyCPBLOfficialText(game, boardText){
+  if(game.league !== 'CPBL' || !boardText) return false;
+  const aj=game.analysis_json||{};
+  const allText=cleanAnalysisText(boardText);
+  const away=aj.true_away || game.home;
+  const home=aj.true_home || game.away;
+  let changed=false;
+  const awayLine=extractCPBLTeamLine(allText, away);
+  const homeLine=extractCPBLTeamLine(allText, home);
+  if(awayLine !== '待更新' || homeLine !== '待更新'){
+    aj.metrics=[
+      ['本季戰績', awayLine, homeLine, 50, 50, '', ''],
+      ['獨贏方向', game.money, `${game.confidence?.[0]||58}%`, game.confidence?.[0]||58, 100-(game.confidence?.[0]||58), '', ''],
+      ['讓分方向', game.spread, `${game.confidence?.[1]||56}%`, game.confidence?.[1]||56, 100-(game.confidence?.[1]||56), '', ''],
+      ['大小分方向', game.total, `${game.confidence?.[2]||55}%`, game.confidence?.[2]||55, 100-(game.confidence?.[2]||55), '', '']
+    ];
+    aj.recent=[
+      {team:away, side:'客隊', items:[['近期/戰績', away, awayLine, '-']]},
+      {team:home, side:'主隊', items:[['近期/戰績', home, homeLine, '-']]}
+    ];
+    changed=true;
+  }
+  if(game.sport==='baseball' && Array.isArray(aj.starters)){
+    aj.starters=aj.starters.map(s=>{
+      const stats=extractCPBLPitcherFromToplist(allText, s.name||'');
+      if(stats){ changed=true; return {...s, stats}; }
+      return s;
+    });
+  }
+  if(changed){
+    aj.detail_status='cpbl_official_enriched';
+    aj.h2h = aj.h2h || [['近期對戰',[away,'-'],[home,'-'],'CPBL 官方戰績頁已補入本季/近期資訊，對戰細項依賽前頁更新']];
+    aj.source_note=''; aj.data_sources=[];
+    game.analysis_json=aj;
+  }
+  return changed;
+}
+
 function applyYahooScoreboardText(game, boardText){
   if(!boardText) return false;
+  if(game.league === 'CPBL') return applyCPBLOfficialText(game, boardText);
   const aj=game.analysis_json||{};
   const allText=cleanAnalysisText(boardText);
   const away=aj.true_away || game.home;
@@ -851,6 +920,168 @@ function applyYahooScoreboardText(game, boardText){
   }
   if(changed){ aj.detail_status='yahoo_scoreboard_batch_enriched'; aj.source_note=''; aj.data_sources=[]; game.analysis_json=aj; }
   return changed;
+}
+
+
+
+// ===== v87 individual game API layer =====
+async function fetchJsonUrl(url, options = {}) {
+  const res = await fetch(url, options);
+  const txt = await res.text();
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${txt.slice(0, 300)}`);
+  try { return txt ? JSON.parse(txt) : null; } catch { return null; }
+}
+const MLB_TEAM_IDS = new Map(Object.entries({
+  '響尾蛇':109,'亞歷桑那':109,'勇士':144,'亞特蘭大':144,'金鶯':110,'巴爾的摩':110,'紅襪':111,'波士頓':111,
+  '小熊':112,'芝加哥小熊':112,'紅人':113,'辛辛那提':113,'守護者':114,'印地安人':114,'克里夫蘭':114,
+  '洛磯':115,'科羅拉多':115,'老虎':116,'底特律':116,'太空人':117,'休士頓':117,'皇家':118,'堪薩斯':118,
+  '道奇':119,'洛杉磯道奇':119,'國民':120,'華盛頓':120,'大都會':121,'紐約大都會':121,'運動家':133,'運動人':133,
+  '海盜':134,'匹茲堡':134,'教士':135,'聖地牙哥':135,'水手':136,'西雅圖':136,'巨人':137,'舊金山':137,
+  '紅雀':138,'聖路易':138,'光芒':139,'坦帕灣':139,'遊騎兵':140,'德州':140,'藍鳥':141,'多倫多':141,
+  '雙城':142,'明尼蘇達':142,'費城人':143,'費城':143,'白襪':145,'芝加哥白襪':145,'馬林魚':146,'邁阿密':146,
+  '洋基':147,'紐約洋基':147,'釀酒人':158,'密爾瓦基':158,'天使':108,'洛杉磯天使':108
+}).map(([k,v])=>[k,v]));
+function mlbTeamId(name='') {
+  const clean = cleanTeamName(name);
+  for (const [k,v] of MLB_TEAM_IDS) if (clean.includes(k) || k.includes(clean)) return v;
+  return null;
+}
+function gameApiDate(game) {
+  const rawDay = game.raw_data?.raw_day_type || game.game_day_type || 'today';
+  if (US_SHIFT_LEAGUES.has(game.league) && rawDay === 'tomorrow') return dateTW(1);
+  return game.game_date || dateTW(0);
+}
+async function fetchMlbPitcherSeason(playerId, season) {
+  if (!playerId) return null;
+  const url = `https://statsapi.mlb.com/api/v1/people/${playerId}/stats?stats=season&group=pitching&season=${season}`;
+  const data = await fetchJsonUrl(url);
+  const stat = data?.stats?.[0]?.splits?.[0]?.stat || null;
+  if (!stat) return null;
+  return {
+    ERA: stat.era || '待更新',
+    WHIP: stat.whip || '待更新',
+    勝投: stat.wins != null ? String(stat.wins) : '待更新',
+    敗投: stat.losses != null ? String(stat.losses) : '待更新',
+    近況: `本季 ${stat.inningsPitched || '-'} 局，${stat.strikeOuts || '-'} 次三振，ERA ${stat.era || '待更新'}，WHIP ${stat.whip || '待更新'}`
+  };
+}
+function applyPitcherStatsToStarter(starter, stats) {
+  if (!starter || !stats) return;
+  starter.stats = [
+    ['ERA', stats.ERA || '待更新'],
+    ['WHIP', stats.WHIP || '待更新'],
+    ['勝投', stats.勝投 || '待更新'],
+    ['敗投', stats.敗投 || '待更新'],
+    ['近況', stats.近況 || '待更新']
+  ];
+}
+async function fetchMlbTeamStats(teamId, season, group='hitting') {
+  if (!teamId) return null;
+  try {
+    const url = `https://statsapi.mlb.com/api/v1/teams/${teamId}/stats?stats=season&group=${group}&season=${season}`;
+    const data = await fetchJsonUrl(url);
+    return data?.stats?.[0]?.splits?.[0]?.stat || null;
+  } catch (e) { console.warn(`MLB team stats failed team=${teamId} group=${group}:`, e.message); return null; }
+}
+async function enrichMLBOfficialStats(game) {
+  if (game.league !== 'MLB') return false;
+  const aj = game.analysis_json || {};
+  const awayName = aj.true_away || game.home;
+  const homeName = aj.true_home || game.away;
+  const awayId = mlbTeamId(awayName);
+  const homeId = mlbTeamId(homeName);
+  if (!awayId || !homeId) { aj.api_status = 'mlb_team_id_not_matched'; game.analysis_json = aj; return false; }
+  const date = gameApiDate(game);
+  const season = date.slice(0,4);
+  try {
+    const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${date}&hydrate=probablePitcher,team`;
+    const sched = await fetchJsonUrl(scheduleUrl);
+    const games = (sched?.dates || []).flatMap(d=>d.games || []);
+    const found = games.find(g => {
+      const h = g?.teams?.home?.team?.id;
+      const a = g?.teams?.away?.team?.id;
+      return (h === homeId && a === awayId) || (h === awayId && a === homeId);
+    });
+    if (!found) { aj.api_status = `mlb_official_no_match_${date}`; game.analysis_json = aj; return false; }
+    const homePitcher = found.teams?.home?.probablePitcher;
+    const awayPitcher = found.teams?.away?.probablePitcher;
+    const homeStarter = (aj.starters || []).find(s => s.team === homeName || s.role?.includes('主'));
+    const awayStarter = (aj.starters || []).find(s => s.team === awayName || s.role?.includes('客'));
+    if (homePitcher?.fullName && homeStarter) homeStarter.name = homePitcher.fullName;
+    if (awayPitcher?.fullName && awayStarter) awayStarter.name = awayPitcher.fullName;
+    const [homePStats, awayPStats, homeHit, awayHit, homePit, awayPit] = await Promise.all([
+      fetchMlbPitcherSeason(homePitcher?.id, season).catch(()=>null),
+      fetchMlbPitcherSeason(awayPitcher?.id, season).catch(()=>null),
+      fetchMlbTeamStats(homeId, season, 'hitting'),
+      fetchMlbTeamStats(awayId, season, 'hitting'),
+      fetchMlbTeamStats(homeId, season, 'pitching'),
+      fetchMlbTeamStats(awayId, season, 'pitching')
+    ]);
+    applyPitcherStatsToStarter(homeStarter, homePStats);
+    applyPitcherStatsToStarter(awayStarter, awayPStats);
+    const metricRows = [];
+    const addMetric = (name, awayVal, homeVal) => {
+      if (awayVal == null && homeVal == null) return;
+      metricRows.push([name, awayVal ?? '待更新', homeVal ?? '待更新', 50, 50, '', '']);
+    };
+    addMetric('打擊率', awayHit?.avg, homeHit?.avg);
+    addMetric('上壘率', awayHit?.obp, homeHit?.obp);
+    addMetric('長打率', awayHit?.slg, homeHit?.slg);
+    addMetric('全壘打', awayHit?.homeRuns, homeHit?.homeRuns);
+    addMetric('得分', awayHit?.runs, homeHit?.runs);
+    addMetric('防禦率', awayPit?.era, homePit?.era);
+    addMetric('WHIP', awayPit?.whip, homePit?.whip);
+    if (metricRows.length) aj.metrics = metricRows;
+    aj.api_status = 'mlb_official_enriched';
+    aj.detail_status = 'official_api_enriched';
+    aj.source_note = '';
+    aj.data_sources = [];
+    game.analysis_json = aj;
+    return true;
+  } catch (e) { console.warn(`MLB official API enrichment failed ${awayName} vs ${homeName}:`, e.message); aj.api_status = 'mlb_official_failed'; game.analysis_json = aj; return false; }
+}
+function cleanJsonFromText(text='') {
+  const raw = String(text).trim().replace(/^```(?:json)?/i,'').replace(/```$/,'').trim();
+  const a = raw.indexOf('{'), b = raw.lastIndexOf('}');
+  return a >= 0 && b > a ? raw.slice(a,b+1) : raw;
+}
+async function openAiSummarizeGame(game) {
+  if (!OPENAI_API_KEY) return false;
+  const aj = game.analysis_json || {};
+  const payload = {
+    league: game.league, sport: game.sport, time: game.game_time,
+    home: aj.true_home || game.away, away: aj.true_away || game.home,
+    money: game.money, spread: game.spread, total: game.total,
+    starters: aj.starters || [], core_players: aj.core_players || [], metrics: aj.metrics || [], recent: aj.recent || [], h2h: aj.h2h || []
+  };
+  const prompt = `你是台灣運彩賽事分析助理。請只根據提供的 JSON 資料整理，不要編造不存在的精準數字。輸出 JSON，欄位：summary,risk,picks{safest,main,second,confidence},support{money,spread,total},home_recent,away_recent,h2h_note。主推與副推不可相同。資料：${JSON.stringify(payload).slice(0,12000)}`;
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_API_KEY}` },
+      body: JSON.stringify({ model: OPENAI_MODEL, temperature: 0.35, messages: [{role:'system', content:'你只輸出有效 JSON，不要 markdown。'}, {role:'user', content: prompt}] })
+    });
+    const txt = await res.text();
+    if (!res.ok) throw new Error(txt.slice(0,300));
+    const data = JSON.parse(txt);
+    const content = data?.choices?.[0]?.message?.content || '';
+    const obj = JSON.parse(cleanJsonFromText(content));
+    if (obj?.summary) {
+      aj.search_intel = { ...(aj.search_intel || {}), ...obj, generated_at: nowISO(), ai_model: OPENAI_MODEL, api_based: true };
+      if (obj.support) game.confidence = [obj.support.money || game.confidence?.[0] || 58, obj.support.spread || game.confidence?.[1] || 56, obj.support.total || game.confidence?.[2] || 55];
+      game.analysis_json = aj;
+      return true;
+    }
+  } catch (e) { console.warn(`OpenAI analysis failed ${game.league} ${game.away} vs ${game.home}:`, e.message); }
+  return false;
+}
+async function enrichGamesWithApiLayer(games) {
+  let officialHits = 0, aiHits = 0;
+  for (const game of games) {
+    if (await enrichMLBOfficialStats(game)) officialHits++;
+    if (await openAiSummarizeGame(game)) aiHits++;
+    await new Promise(r=>setTimeout(r,150));
+  }
+  console.log(`Individual API layer done. officialApiHits=${officialHits}, openAiAnalyses=${aiHits}. ${OPENAI_API_KEY ? 'OPENAI_API_KEY found' : 'OPENAI_API_KEY not set, using rule-based analysis only.'}`);
 }
 
 async function enrichGamesWithDetails(context, games){
@@ -902,6 +1133,7 @@ async function enrichGamesWithDetails(context, games){
       game.analysis_json.detail_status = 'yahoo_detail_enriched';
     }
   }
+  await enrichGamesWithApiLayer(games);
   console.log(`Yahoo scoreboard batch enrichment done. yahooBatchHits=${yahooBatchHits}, games=${games.length}, googleFallback=${SEARCH_API_KEY?limit:0}`);
   return games;
 }
@@ -915,7 +1147,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v85-yahoo-scoreboard-batch', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v88-cpbl-official-ai', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 
@@ -929,7 +1161,7 @@ async function writeRawSportsData(rows) {
     const run = await supabaseRequest('raw_sports_sync_runs', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([{ source: 'github_actions', version: 'v85-yahoo-scoreboard-batch', status: 'success', total_games: rows.length, created_at: nowISO() }])
+      body: JSON.stringify([{ source: 'github_actions', version: 'v87-individual-api-ai', status: 'success', total_games: rows.length, created_at: nowISO() }])
     });
     runId = Array.isArray(run) && run[0] ? run[0].id : null;
   } catch (e) { console.warn('raw_sports_sync_runs not written:', e.message); }
@@ -973,29 +1205,29 @@ function dedupeGames(rows) {
   return out;
 }
 async function upsertDailyGames(rows) {
-  // v85 yahoo scoreboard batch：每次同步先刪除今日/明日/昨日顯示池，再寫入本次乾淨資料，避免 Supabase unique key 重複。
+  // v87：每次只維護今日賽事顯示池；同步前先刪除 today 舊資料，再寫入本次乾淨資料。
   const cleanRows = dedupeGames(rows).map(stripDailyRow);
   try { await writeRawSportsData(cleanRows); } catch(e) { console.warn('raw data center skipped:', e.message); }
-  await supabaseRequest(`daily_games?game_day_type=in.(today,tomorrow,yesterday)`, {
+  await supabaseRequest(`daily_games?game_day_type=eq.today`, {
     method: 'DELETE',
     headers: { Prefer: 'return=minimal' }
   }).catch(e=>console.warn('delete old display rows failed:', e.message));
-  if (!cleanRows.length) { await writeSyncStatus('empty', 'v85 parsed 0 valid games', 0); return; }
+  if (!cleanRows.length) { await writeSyncStatus('empty', 'v87 parsed 0 valid games', 0); return; }
   await supabaseRequest('daily_games', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify(cleanRows)
   });
-  await writeSyncStatus('success', `v85 synced ${cleanRows.length} valid games`, cleanRows.length);
+  await writeSyncStatus('success', `v87 synced ${cleanRows.length} valid games`, cleanRows.length);
 }
 
 async function main() {
   await waitUntilTaipeiDateReady();
-  console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}), tomorrow=${dateTW(1)} (${mdTW(1)})`);
+  console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}). Single display pool enabled.`);
   const games = await scrapePlaySportWithBrowser();
-  console.log(`Parsed valid games v85 yahoo scoreboard batch: ${games.length}`);
+  console.log(`Parsed valid games v87 individual api ai: ${games.length}`);
   console.log(games.slice(0, 60).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   await upsertDailyGames(games);
-  console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid upcoming games parsed for today/tomorrow.');
+  console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed for today display pool.');
 }
 main().catch(err => { console.error(err); process.exit(1); });
