@@ -1,1 +1,1 @@
-v110 MLB Yahoo/API + varied AI + football no-prob
+v111 MLB official h2h/recent + compact recent + varied AI

@@ -9,7 +9,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABA
 const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'off').toLowerCase();
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
 const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID || '';
-// v109: MLB Yahoo 單場配對改用日期+隊名+開賽時間評分；避免系列賽抓錯，抓不到先發則顯示先發尚未公布。
+// v111: MLB 官方 API 補近期對戰/近期賽況；近況欄位前台獨立小字；移除假 H2H；AI 文案強化每場差異。
 const SEARCH_FALLBACK_ENABLED = String(process.env.SEARCH_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
 const SEARCH_ENRICH_LIMIT = Number(process.env.SEARCH_ENRICH_LIMIT || 0);
 const SEARCH_RESULTS_PER_QUERY = Number(process.env.SEARCH_RESULTS_PER_QUERY || 5);
@@ -715,21 +715,26 @@ function buildSearchBasedAnalysis(game, searchRows) {
           `棒球讓分容錯較低，若盤口偏向一方但大小分沒有同步放大，代表市場可能更看重投手壓制。`,
           `若雙方牛棚近期消耗偏高，後段失分風險會放大，大小分比獨贏更需要臨場確認。`
         ]);
+  const timeNote = game.game_time ? `開賽時間落在 ${game.game_time}` : '開賽時間仍以盤口頁為準';
   const summaryPool = [
-    `本場是${game.league}賽事，${away} 對上 ${home}，目前盤口重心落在「${picks.main}」。從${game.money || '獨贏盤'}、${game.spread || '讓分盤'}與${game.total || '大小分'}交叉看，這場比較適合用主推單一方向控管風險。`,
-    `${away} 與 ${home} 這場的盤口結構不算單純，獨贏方向雖有傾向，但真正決定投注價值的是${game.spread || '讓分盤'}能不能支撐。模型目前把「${picks.main}」排在第一順位。`,
-    `以目前玩運彩已開出的盤來看，${game.league} 這場市場並沒有完全平均分散，${picks.main} 是比較明確的觀察點；副推「${picks.second}」則適合小注搭配，不建議三盤全追。`,
-    `這場${away} vs ${home} 的重點在盤口是否過深。若臨場沒有反向變盤，主推仍以「${picks.main}」為主，但若賽前水位突然修正，就要把信心降一階。`,
-    `綜合隊名對位、開賽時間與目前盤口，系統給「${picks.main}」較高權重。${game.total || '大小分'}可以作為第二觀察方向，但仍要避免盤口未穩時重壓。`
+    `${game.league} 這場 ${away} 對 ${home}，${timeNote}；盤口目前給出「${game.money || '獨贏待確認'}、${game.spread || '讓分待確認'}、${game.total || '大小待確認'}」，模型先把「${picks.main}」排在主觀察。`,
+    `這場不是單看人氣就能下，${away} 與 ${home} 的盤口重點在 ${game.spread || '讓分盤'} 是否合理；目前主推「${picks.main}」，副推則用「${picks.second}」分散風險。`,
+    `以 ${away} vs ${home} 的盤型來看，獨贏與大小分方向沒有完全重疊，若臨場盤口維持不變，系統會優先考慮「${picks.main}」。`,
+    `${game.league} 本場的核心是盤口深度：${game.spread || '讓分未開'} 搭配 ${game.total || '大小未開'}，若沒有反向變盤，「${picks.main}」比其他方向更有連貫性。`,
+    `目前已開盤資訊顯示，${home} 與 ${away} 的對位會受臨場名單影響，但從盤口結構看，「${picks.main}」仍是比較明確的第一順位。`,
+    `這場 ${away} 作客、${home} 主場，模型會把開賽時間、讓分深度與大小分位置一起看；目前結論偏向「${picks.main}」，不建議三盤全押。`,
+    `若只看單一盤容易誤判，${game.money || '獨贏'} 與 ${game.total || '大小分'} 要交叉確認；本場暫以「${picks.main}」作為主推方向。`
   ];
   const searchedLine = hasSearch && searchText.length >= 20 ? ` 已整理到的公開資料會優先影響近況判斷，但精準數字仍以已抓到欄位為準。` : '';
   const summary = pickVariant(marketSeed + 'summaryV110', summaryPool) + searchedLine;
   const riskPool = [
-    `${sportTone} 這場若臨場盤口突然往相反方向修正，代表市場資金可能出現變化，原本主推要保守看待。`,
-    `風險主要在${game.spread || '讓分盤'}與${game.total || '大小分'}同時變動時，若兩個方向互相矛盾，建議只留主推，不要硬追副推。`,
-    `若賽前名單、先發或天候資訊出現異動，本場 AI 量表要重新檢查；目前結論只適用於當下已開盤盤口。`,
-    `這場不適合只看人氣方向，因為${picks.main}雖然分數較高，但若開賽前盤口被拉深，過盤難度會同步提高。`,
-    `最大變數在臨場投注選項是否縮盤或關盤；若接近開賽時仍維持同方向，主推可信度才會比較穩。`
+    `${sportTone} 若臨場盤口從「${game.spread || '讓分盤'}」突然改深，${picks.main} 的過盤壓力會提高，建議降低注碼。`,
+    `本場最大風險是 ${game.total || '大小分'} 與 ${game.spread || '讓分盤'} 方向不同步；若臨場兩盤互相打架，就只保留主推。`,
+    `若賽前名單、先發、天候或輪休有異動，${away} vs ${home} 的判斷要重新看，現在結論只適用目前盤口。`,
+    `${picks.main} 雖然是目前第一順位，但若接近開賽前投注選項縮盤或關盤，代表市場不確定性升高。`,
+    `如果 ${game.money || '獨贏盤'} 與 ${game.spread || '讓分盤'} 的方向出現反向修正，這場不要硬追副推，等臨場確認。`,
+    `${away} 與 ${home} 若開局節奏和預期不同，${game.total || '大小盤'} 會最先受影響，大小分方向要特別保守。`,
+    `此場風險不在有沒有方向，而是在盤口是否已經反映過多期待；若水位被拉低，主推價值會被壓縮。`
   ];
   const risk = pickVariant(marketSeed + 'riskV110', riskPool);
   return {
@@ -748,19 +753,10 @@ function applySearchIntel(game, searchRows) {
   aj.detail_status = searchRows.length ? 'search_enriched' : 'market_model_only';
   const away = aj.true_away || game.home;
   const home = aj.true_home || game.away;
-  if (intel.search_available && !isGenericIntelText(intel.away_recent + intel.home_recent)) {
-    aj.recent = [
-      { team: away, side: '客隊', items: [['近期情蒐', away, intel.away_recent, '-']] },
-      { team: home, side: '主隊', items: [['近期情蒐', home, intel.home_recent, '-']] }
-    ];
-  } else {
-    aj.recent = Array.isArray(aj.recent) ? aj.recent : [];
-  }
-  if (intel.search_available && !isGenericIntelText(intel.h2h_note)) {
-    aj.h2h = [['近期對戰', [away, '-'], [home, '-'], intel.h2h_note]];
-  } else {
-    aj.h2h = Array.isArray(aj.h2h) ? aj.h2h : [];
-  }
+  // v111：搜尋摘要只用於 AI 文案，不再塞進「近期賽況 / 歷史對戰」欄位。
+  // 這兩區只顯示官方 API 或 Yahoo 單場頁解析到的結構化資料，避免出現假資料或擠在格子內。
+  aj.recent = Array.isArray(aj.recent) ? aj.recent : [];
+  aj.h2h = Array.isArray(aj.h2h) ? aj.h2h : [];
   aj.metrics = [
     ['獨贏方向', game.money, `${intel.support.money}%`, intel.support.money, 100-intel.support.money, '盤口/搜尋', '模型'],
     ...((game.sport === 'football' && /無建議|待確認|未開盤/.test(String(game.spread||''))) ? [] : [['讓分方向', game.spread, `${intel.support.spread}%`, intel.support.spread, 100-intel.support.spread, '盤口/搜尋', '模型']]),
@@ -1115,7 +1111,7 @@ function applyYahooScoreboardText(game, boardText){
       {team:home, side:'主隊', items:[['近期', home, recentHome, '-']]}
     ]; changed=true;
   }
-  if(h2h!=='待更新') { aj.h2h=[['近期對戰',[away,'-'],[home,'-'],h2h]]; changed=true; }
+  // v111：Yahoo 整頁文字抓到的 TEAM MATCHUPS 標題不一定是結構化對戰紀錄，不直接塞入 H2H。
   if(/TEAM COMPARISON|Team Comparison|Batting Average|Runs Scored|Home Runs|場均得分|命中率/.test(allText)){
     const metricNote = safeShortNote(allText, ['TEAM COMPARISON','Batting Average','Runs Scored','Home Runs','場均得分','命中率']);
     if(metricNote!=='待更新'){
@@ -1192,6 +1188,60 @@ async function fetchMlbTeamStats(teamId, season, group='hitting') {
     return data?.stats?.[0]?.splits?.[0]?.stat || null;
   } catch (e) { console.warn(`MLB team stats failed team=${teamId} group=${group}:`, e.message); return null; }
 }
+
+function mlbGameWinnerLabel(game, awayId, homeId) {
+  const aScore = game?.teams?.away?.score;
+  const hScore = game?.teams?.home?.score;
+  if (aScore == null || hScore == null) return '-';
+  if (aScore === hScore) return '平';
+  const winAway = aScore > hScore;
+  const ourAway = game?.teams?.away?.team?.id === awayId;
+  const ourHome = game?.teams?.home?.team?.id === homeId;
+  if (winAway && ourAway) return '客勝';
+  if (!winAway && ourHome) return '主勝';
+  return winAway ? '客勝' : '主勝';
+}
+function mlbDisplayPair(game) {
+  const a = game?.teams?.away?.team?.name || game?.teams?.away?.team?.teamName || '客隊';
+  const h = game?.teams?.home?.team?.name || game?.teams?.home?.team?.teamName || '主隊';
+  const as = game?.teams?.away?.score;
+  const hs = game?.teams?.home?.score;
+  return { away:a, home:h, awayScore: as ?? '-', homeScore: hs ?? '-' };
+}
+function mlbGameDateTW(game) {
+  if (!game?.gameDate) return '';
+  return new Intl.DateTimeFormat('zh-TW', { timeZone:'Asia/Taipei', month:'2-digit', day:'2-digit' }).format(new Date(game.gameDate));
+}
+async function fetchMlbH2HAndRecent(awayId, homeId, baseDate) {
+  const startDate = addIsoDays(baseDate, -210);
+  const endDate = addIsoDays(baseDate, 1);
+  const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=${awayId}&opponentId=${homeId}&startDate=${startDate}&endDate=${endDate}&hydrate=team`;
+  const data = await fetchJsonUrl(url).catch(e => { console.warn('MLB H2H schedule failed:', e.message); return null; });
+  const games = (data?.dates || []).flatMap(d => d.games || []).filter(g => g?.status?.abstractGameState === 'Final' || g?.status?.detailedState === 'Final');
+  const sorted = games.sort((a,b)=>new Date(b.gameDate)-new Date(a.gameDate));
+  const h2h = sorted.slice(0,6).map(g => {
+    const p = mlbDisplayPair(g);
+    return [mlbGameDateTW(g), [p.away, String(p.awayScore)], [p.home, String(p.homeScore)], mlbGameWinnerLabel(g, awayId, homeId)];
+  });
+  return h2h;
+}
+async function fetchMlbTeamRecent(teamId, teamName, baseDate) {
+  const startDate = addIsoDays(baseDate, -35);
+  const endDate = addIsoDays(baseDate, -1);
+  const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId=${teamId}&startDate=${startDate}&endDate=${endDate}&hydrate=team`;
+  const data = await fetchJsonUrl(url).catch(e => { console.warn(`MLB recent schedule failed ${teamName}:`, e.message); return null; });
+  const games = (data?.dates || []).flatMap(d => d.games || []).filter(g => g?.status?.abstractGameState === 'Final' || g?.status?.detailedState === 'Final').sort((a,b)=>new Date(b.gameDate)-new Date(a.gameDate)).slice(0,5);
+  const items = games.map(g => {
+    const isAway = g?.teams?.away?.team?.id === teamId;
+    const opp = isAway ? (g?.teams?.home?.team?.teamName || g?.teams?.home?.team?.name || '對手') : (g?.teams?.away?.team?.teamName || g?.teams?.away?.team?.name || '對手');
+    const myScore = isAway ? g?.teams?.away?.score : g?.teams?.home?.score;
+    const oppScore = isAway ? g?.teams?.home?.score : g?.teams?.away?.score;
+    const result = myScore > oppScore ? '贏' : myScore < oppScore ? '輸' : '平';
+    return [mlbGameDateTW(g), `${isAway ? '@' : 'vs'} ${opp}`, `${myScore ?? '-'} - ${oppScore ?? '-'}`, result];
+  });
+  return { team: teamName, side:'近期', items };
+}
+
 async function enrichMLBOfficialStats(game) {
   if (game.league !== 'MLB') return false;
   const aj = game.analysis_json || {};
@@ -1261,6 +1311,14 @@ async function enrichMLBOfficialStats(game) {
     addMetric('防禦率', awayPit?.era, homePit?.era);
     addMetric('WHIP', awayPit?.whip, homePit?.whip);
     if (metricRows.length) aj.metrics = metricRows;
+    const [h2hRows, awayRecent, homeRecent] = await Promise.all([
+      fetchMlbH2HAndRecent(awayId, homeId, baseDate).catch(()=>[]),
+      fetchMlbTeamRecent(awayId, awayName, baseDate).catch(()=>null),
+      fetchMlbTeamRecent(homeId, homeName, baseDate).catch(()=>null)
+    ]);
+    if (Array.isArray(h2hRows) && h2hRows.length) aj.h2h = h2hRows;
+    const recentBlocks = [awayRecent, homeRecent].filter(x=>x && Array.isArray(x.items) && x.items.length);
+    if (recentBlocks.length) aj.recent = recentBlocks;
     aj.api_status = 'mlb_official_enriched';
     aj.detail_status = 'official_api_enriched';
     aj.source_note = '';
@@ -1573,7 +1631,7 @@ async function incrementalDailyGames(rows) {
       }
     }
   }
-  const msg = `v108 incremental: new=${toInsert.length}, odds_changed=${toPatch.length}, skipped=${skipped}, inactive=${inactive}, checked=${incoming.length}`;
+  const msg = `v111 incremental: new=${toInsert.length}, odds_changed=${toPatch.length}, skipped=${skipped}, inactive=${inactive}, checked=${incoming.length}`;
   console.log(msg);
   await writeSyncStatus('success', msg, incoming.length);
 }
@@ -1596,7 +1654,7 @@ async function upsertDailyGames(rows) {
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify(cleanRows)
   });
-  await writeSyncStatus('success', `v98 synced ${cleanRows.length} valid games`, cleanRows.length);
+  await writeSyncStatus('success', `v111 synced ${cleanRows.length} valid games`, cleanRows.length);
 }
 
 async function main() {
@@ -1606,7 +1664,7 @@ async function main() {
   const incremental = SYNC_MODE === 'incremental';
   const scraped = await scrapePlaySportWithBrowser({ skipEnrichment: incremental });
   const games = [...promoted, ...scraped];
-  console.log(`Parsed valid games v107 today/tomorrow: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
+  console.log(`Parsed valid games v111 today/tomorrow: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   if (incremental) {
     await incrementalDailyGames(games);
