@@ -4,7 +4,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
 
-// v92：足球移除近期區塊 + 讓分無盤顯示無建議
+// v93：修正 US_SHIFT_LEAGUES 未定義錯誤；Google CSE 錯誤不影響主同步
 // 玩運彩只抓賽事與運彩盤口；Yahoo 運動用指定日期 scoreboard 補 MLB / CPBL 等數據；OpenAI 可選用來統整所有數據成 AI 分析。
 const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'google').toLowerCase();
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
@@ -28,6 +28,7 @@ const TARGETS = [
   { allianceId: 4, label: '足球', sport: 'football', league: '足球' }
 ];
 const TOMORROW_SOURCE_LEAGUES = new Set(['MLB','NBA','WNBA','足球']);
+const US_SHIFT_LEAGUES = TOMORROW_SOURCE_LEAGUES; // 美國/跨日時差來源：用 tomorrow 抓，但前台仍顯示今日賽事
 function sourceDayForLeague(league) {
   // 指定來源日：MLB / NBA / WNBA / 足球 從玩運彩 gameday=tomorrow；其他分類從 gameday=today。
   return TOMORROW_SOURCE_LEAGUES.has(league) ? 'tomorrow' : 'today';
