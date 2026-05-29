@@ -1,4 +1,4 @@
-name: Sports sync v110 MLB Yahoo AI fixes
+name: Sports sync v111 MLB h2h recent compact
 
 on:
   schedule:
