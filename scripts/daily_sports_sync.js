@@ -403,9 +403,9 @@ async function scrapePlaySportWithBrowser() {
   ];
   try {
     for (const day of dayPlans) {
-      const syncDate = dateTW(US_SHIFT_LEAGUES.has(target.league) ? 0 : day.offset);
-      console.log(`=== ${day.label} / ${syncDate} ===`);
+      console.log(`=== ${day.label} ===`);
       for (const target of TARGETS) {
+        const syncDate = dateTW(US_SHIFT_LEAGUES.has(target.league) ? 0 : day.offset);
         const page = await context.newPage();
         const url = playSportUrl(target, day.type);
         try {
