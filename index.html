@@ -338,7 +338,7 @@ body:not(.vip-user) #modalBody section.grid > div:nth-child(n+2)::after{
         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
           <div>
             <h2 class="font-black text-lg">今日賽事</h2>
-            <p class="text-xs text-slate-500 mt-1">首頁只顯示最重要的方向，詳細數據點「查看數據」。</p>
+            <p class="text-xs text-slate-500 mt-1">首頁顯示今日/明日最重要的方向，詳細數據點「查看數據」。</p>
           </div>
           <div class="flex flex-wrap gap-2">
             <button class="sport active rounded-2xl border border-slate-700 px-5 py-3 font-black" data-sport="baseball">棒球</button>
@@ -604,7 +604,7 @@ recent:[
 const rankData={day:[{name:"水過仙人",prob:78,picks:["老虎勝 ★","大 8.5","水晶宮勝"],comments:["今天重點看投手與近期火力。"]},{name:"林口兄弟",prob:74,picks:["雷霆 -4.5 ★","老虎不讓分"],comments:["雷霆與老虎方向都偏硬。"]},{name:"盤口小王",prob:71,picks:["水晶宮勝 ★"],comments:["足球不追太深。"]},{name:"北區老司機",prob:69,picks:["小 7.5"],comments:["投手盤要看臨場。"]},{name:"VIP小豪",prob:68,picks:["中信兄弟勝"],comments:["本土盤可追。"]},{name:"反路阿辰",prob:66,picks:["天使受讓"],comments:["熱門太熱先反。"]},{name:"小分仔",prob:65,picks:["小 223.5"],comments:["節奏可能不快。"]},{name:"老王體育",prob:64,picks:["老虎 -1.5"],comments:["讓分比獨贏更香。"]},{name:"勇闖天關",prob:62,picks:["水晶宮 -0.5"],comments:["主場面還是比較完整。"]},{name:"夜盤觀察員",prob:60,picks:["大 7.5"],comments:["看盤再追。"]}]};
 rankData.week=rankData.day.map((x,i)=>({...x,prob:Math.max(60,x.prob-2+i%3)})); rankData.month=rankData.day.map((x,i)=>({...x,prob:Math.max(60,x.prob-3+i%4)}));
 
-let state={sport:'baseball',league:'MLB'};
+let state={sport:'baseball',league:'MLB',dayType:'today'};
 const $=id=>document.getElementById(id);
 
 const LS_USERS='pgai_users_v3';
@@ -622,6 +622,7 @@ let punditSort='time';
 function init(){
   ensureUsers();
   renderAuthUI();
+  renderDaySwitch();
   renderLeagues();
   renderGames();
   renderRank();
@@ -702,21 +703,36 @@ function jumpToGame(league,sport,index){ closeMemberCenter(); state.sport=sport;
 function betUrl(){ const href=location.href.toLowerCase(); const cfg=window.SPORTS_SITE_CONFIG||{}; if(href.includes('yao88')||href.includes('longnv')||href.includes('dragon')) return cfg.LONGNV_BET_URL || 'https://money777.mw168.online'; return cfg.PAOGE_BET_URL || 'https://money888.mw168.online'; }
 function openBet(){ window.open(betUrl(),'_blank'); }
 
+
+function renderDaySwitch(){
+  const box=$('daySwitch');
+  if(!box) return;
+  box.style.display='flex';
+  box.innerHTML=['today','tomorrow'].map(d=>`<button class="day-btn ${state.dayType===d?'active':'bg-slate-900'}" data-day="${d}">${d==='today'?'今日賽事':'明日賽事'}</button>`).join('');
+  box.querySelectorAll('.day-btn').forEach(btn=>btn.onclick=()=>{
+    state.dayType=btn.dataset.day;
+    renderDaySwitch();
+    v52LoadDailyGames();
+  });
+}
+
 function renderLeagues(){
   $('leagues').innerHTML=leagues[state.sport].map(([k,n])=>`<button class="league ${state.league===k?'active':'bg-slate-900'} rounded-2xl border border-slate-700 px-4 py-2 font-black text-sm" data-l="${k}">${n}</button>`).join('');
   document.querySelectorAll('.league').forEach(btn=>btn.onclick=()=>{state.league=btn.dataset.l;renderLeagues();renderGames();});
 }
 function renderGames(){
   const leagueName=leagues[state.sport].find(x=>x[0]===state.league)?.[1]||state.league;
-  $('leagueTitle').textContent=leagueName+'｜今日賽事';
+  $('leagueTitle').textContent=leagueName+'｜'+(state.dayType==='tomorrow'?'明日賽事':'今日賽事');
   const list=games[state.league]||[];
-  if(!list.length){ $('games').innerHTML='<div class="soft rounded-2xl p-6 text-center text-slate-400 font-black">目前沒有抓到此分類賽事；資料中心會每小時重新整理。</div>'; return; }
+  if(!list.length){ $('games').innerHTML='<div class="soft rounded-2xl p-6 text-center text-slate-400 font-black">目前無賽事</div>'; return; }
   $('games').innerHTML=list.map((g,i)=>{
     const title = g.sport==='football' ? `<span class="text-amber-300">主隊</span> ${g.away} <span class="text-slate-500">vs</span> <span class="text-blue-300">客隊</span> ${g.home}` : `${g.away} vs ${g.home}`;
-    const money = g.sport==='football' ? shortFootballMarket(g.money,'money') : g.money;
-    const spread = g.sport==='football' ? shortFootballMarket(g.spread,'spread') : g.spread;
-    const total = shortFootballMarket(g.total,'total');
-    return `<article class="soft rounded-2xl p-3"><div class="grid xl:grid-cols-[minmax(0,1fr)_320px_240px] gap-3 items-center"><div class="min-w-0"><div class="flex items-center gap-2 text-xs text-slate-500 font-black"><span>${g.time}</span><span>•</span><span>${leagueName}</span></div><h3 class="text-lg font-black truncate mt-1">${title}</h3></div><div class="grid grid-cols-3 gap-2">${marketMini('獨贏',money,'emerald')}${marketMini('讓分',spread,'blue')}${marketMini('大小',total,'pink')}</div><div class="action-row"><button onclick="openGame(${i},'data')" class="rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black px-3 py-3">查看數據</button><button onclick="openGame(${i},'board')" class="rounded-xl border border-slate-700 bg-slate-950 text-slate-100 font-black px-3 py-3">留言板</button></div></div></article>`;
+    const isOpen = g.market_open !== false;
+    const money = isOpen ? (g.sport==='football' ? shortFootballMarket(g.money,'money') : g.money) : '未開盤';
+    const spread = isOpen ? (g.sport==='football' ? shortFootballMarket(g.spread,'spread') : g.spread) : '未開盤';
+    const total = isOpen ? shortFootballMarket(g.total,'total') : '未開盤';
+    const dataBtn = isOpen ? `<button onclick="openGame(${i},'data')" class="rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black px-3 py-3">查看數據</button>` : `<button onclick="openGame(${i},'data')" class="rounded-xl border border-slate-700 bg-slate-900 text-slate-400 font-black px-3 py-3">未開盤</button>`;
+    return `<article class="soft rounded-2xl p-3"><div class="grid xl:grid-cols-[minmax(0,1fr)_320px_240px] gap-3 items-center"><div class="min-w-0"><div class="flex items-center gap-2 text-xs text-slate-500 font-black"><span>${g.time}</span><span>•</span><span>${leagueName}</span></div><h3 class="text-lg font-black truncate mt-1">${title}</h3></div><div class="grid grid-cols-3 gap-2">${marketMini('獨贏',money,'emerald')}${marketMini('讓分',spread,'blue')}${marketMini('大小',total,'pink')}</div><div class="action-row">${dataBtn}<button onclick="openGame(${i},'board')" class="rounded-xl border border-slate-700 bg-slate-950 text-slate-100 font-black px-3 py-3">留言板</button></div></div></article>`;
   }).join('');
 }
 function shortFootballMarket(val,type){
@@ -779,9 +795,10 @@ function openGame(i,tab='data'){
   $('modalLeague').textContent=`${state.league}｜${g.time}`;
   $('modalTitle').textContent=gameDisplayTitle(g);
   const optionalSection=(title,rows,renderer)=>Array.isArray(rows)&&rows.length?section(title,renderer(rows)):'';
-  const dataHtml = g.sport==='football'
+  const closedHtml = `<section class="soft rounded-2xl p-6 text-center"><div class="text-2xl font-black text-amber-300">未開盤</div><p class="text-slate-400 font-bold mt-2">此場玩運彩盤口尚未開出，暫不提供預測與 AI 分析。</p></section>`;
+  const dataHtml = g.market_open === false ? closedHtml : (g.sport==='football'
     ? `${summaryCards(g)}${searchIntelBlock(g)}${section('雙方近況分析',footballAnalysis(d,g))}${optionalSection('雙方對比',d.metrics,(rows)=>comparison(rows,g.away,g.home))}`
-    : `${summaryCards(g)}${searchIntelBlock(g)}${section(d.topTitle,topBlock(d.top,g.sport))}${optionalSection('傷員狀況',d.injuries,(rows)=>injuries(rows,g.sport))}${optionalSection('雙方對比',d.metrics,(rows)=>comparison(rows,g.away,g.home))}${optionalSection('雙方歷史對戰',d.h2h,h2h)}${optionalSection('雙方近期賽況',d.recent,recent)}`;
+    : `${summaryCards(g)}${searchIntelBlock(g)}${section(d.topTitle,topBlock(d.top,g.sport))}${optionalSection('傷員狀況',d.injuries,(rows)=>injuries(rows,g.sport))}${optionalSection('雙方對比',d.metrics,(rows)=>comparison(rows,g.away,g.home))}${optionalSection('雙方歷史對戰',d.h2h,h2h)}${optionalSection('雙方近期賽況',d.recent,recent)}`);
   const boardHtml=`${section('',pundits(g))}${section('',playerComments())}`;
   $('modalBody').innerHTML=`<div class="comment-tabs"><button class="comment-tab ${tab==='data'?'active':''}" onclick="openGame(${i},'data')">查看數據</button><button class="comment-tab ${tab==='board'?'active':''}" onclick="openGame(${i},'board')">留言板</button></div>${tab==='data'?dataHtml:boardHtml}`;
 }
@@ -1254,9 +1271,10 @@ function v24Who(){
 }
 async function v24Rows(typeName){
   try{
-    return await sbFetch('interaction_counts',{
-      query:`?type=eq.${encodeURIComponent(typeName)}&select=account,nickname,count,type,updated_at&limit=1000`
+    const rows = await sbFetch('interaction_counts',{
+      query:`?select=id,account,nickname,count,type,interaction_type,updated_at&limit=2000`
     });
+    return (rows||[]).filter(r => (r.type===typeName) || (r.interaction_type===typeName));
   }catch(e){
     console.warn('v24Rows failed', typeName, e);
     return [];
@@ -1294,20 +1312,38 @@ async function v24RefreshInteractions(){
 async function v24AddInteraction(typeName){
   const who=v24Who();
   try{
-    await sbFetch('interaction_counts',{
-      method:'POST',
-      headers:{Prefer:'return=minimal'},
-      body:{
-        account:who.account,
-        nickname:who.nickname,
-        type:typeName,
-        interaction_type:typeName,
-        count:1,
-        updated_at:new Date().toISOString()
-      }
+    const existing = await sbFetch('interaction_counts',{
+      query:`?account=eq.${encodeURIComponent(who.account)}&select=id,account,nickname,count,type,interaction_type&limit=1000`
     });
+    const row = (existing||[]).find(r => r.type===typeName || r.interaction_type===typeName);
+    if(row && row.id){
+      await sbFetch('interaction_counts',{
+        method:'PATCH',
+        query:`?id=eq.${encodeURIComponent(row.id)}`,
+        headers:{Prefer:'return=minimal'},
+        body:{
+          nickname:who.nickname,
+          type:typeName,
+          interaction_type:typeName,
+          count:Number(row.count||0)+1,
+          updated_at:new Date().toISOString()
+        }
+      });
+    }else{
+      await sbFetch('interaction_counts',{
+        method:'POST',
+        headers:{Prefer:'return=minimal'},
+        body:{
+          account:who.account,
+          nickname:who.nickname,
+          type:typeName,
+          interaction_type:typeName,
+          count:1,
+          updated_at:new Date().toISOString()
+        }
+      });
+    }
   }catch(e){
-    // v47: Do not interrupt users with Supabase RLS popup; SQL_FIX_INTERACTION_COUNTS_RLS_v47.sql fixes persistence.
     console.warn('v24AddInteraction failed', typeName, e);
   }
   await v24RefreshInteractions();
@@ -2879,7 +2915,7 @@ setInterval(()=>{
 
 
 <script>
-/* ===== v65: daily_games today/tomorrow sync reader =====
+/* ===== v97: daily_games today/tomorrow sync reader =====
    GitHub Actions writes PlaySport/Yahoo/SofaScore-derived games into Supabase daily_games.
    Frontend reads that table and replaces static demo games when rows exist.
 */
@@ -2896,7 +2932,7 @@ function v52TodayTW(offsetDays=0){
 }
 function v53DailyGamesDate(){ return v52TodayTW(0); }
 
-function v65GameDayType(){ return 'today'; }
+function v65GameDayType(){ return state.dayType || 'today'; }
 function v52NormalizeDailyGame(r){
   return {
     time:r.game_time || '',
@@ -2909,7 +2945,8 @@ function v52NormalizeDailyGame(r){
     conf:Array.isArray(r.confidence) ? r.confidence : [60,60,60],
     source_url:r.source_url || '',
     source_name:'',
-    analysis_json:r.analysis_json || {}
+    analysis_json:r.analysis_json || {},
+    market_open: !(r.analysis_json && r.analysis_json.market_open === false)
   };
 }
 async function v52LoadDailyGames(){
@@ -2925,12 +2962,13 @@ async function v52LoadDailyGames(){
       keys.forEach(k=>{ if(games[k]) games[k]=[]; });
       renderGames();
       const box=document.getElementById('games');
-      if(box) box.innerHTML='<div class="soft rounded-2xl p-6 text-center text-slate-400 font-black">目前沒有抓到此分類賽事資料；MLB / NBA / WNBA 來源採玩運彩 tomorrow，其餘聯盟採 today，前台統一顯示今日賽事。</div>';
+      if(box) box.innerHTML='<div class="soft rounded-2xl p-6 text-center text-slate-400 font-black">目前無賽事</div>';
       const badge=document.querySelector('#gamesBlock .text-emerald-300');
       if(badge) badge.textContent='資料未抓到';
       return;
     }
     const grouped={};
+    ['MLB','NPB','CPBL','KBO','NBA','WNBA','CBA','足球','ECL','EPL','INT'].forEach(k=>{ if(games[k]) games[k]=[]; });
     rows.forEach(r=>{
       const league=r.league || 'MLB';
       if(!grouped[league]) grouped[league]=[];
@@ -2946,6 +2984,7 @@ async function v52LoadDailyGames(){
       const first=leagues[state.sport]?.[0]?.[0];
       if(first) state.league=first;
     }
+    renderDaySwitch();
     renderLeagues();
     renderGames();
     const badge=document.querySelector('#gamesBlock .text-emerald-300');
