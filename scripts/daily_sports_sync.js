@@ -15,6 +15,15 @@ const TARGETS = [
   { allianceId: 94, label: '中國職籃', sport: 'basketball', league: 'CBA' },
   { allianceId: 4, label: '足球', sport: 'football', league: '足球' }
 ];
+const US_SHIFT_LEAGUES = new Set(['MLB','NBA','WNBA']);
+function displayDayForLeague(league, dayType) {
+  if (US_SHIFT_LEAGUES.has(league)) return dayType === 'today' ? 'yesterday' : 'today';
+  return dayType;
+}
+function displayDayLabelForLeague(league, dayType) {
+  const v = displayDayForLeague(league, dayType);
+  return v === 'yesterday' ? '昨日賽事' : v === 'tomorrow' ? '明日賽事' : '今日賽事';
+}
 function playSportUrl(target, dayType) {
   return `${BASE_URL}?allianceid=${target.allianceId}&gameday=${dayType}`;
 }
@@ -289,8 +298,8 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v67-detail-enrichment', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
-      display_order: 'home_first', competition, sport_label: target.label,
+      parser_version: 'v68-strict-fields-timezone-fix', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'),
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
       injuries: defaultInjuries(awayTeam, homeTeam, target.sport),
@@ -399,7 +408,7 @@ async function scrapePlaySportWithBrowser() {
             const g = convertGroupToGame(group, target, page.url());
             if (g) { games.push(g); parsed++; }
           }
-          console.log(`${day.type} ${target.label}: url=${url}, groups=${totalGroups}, finished_skipped=${rejectedFinished}, parsed=${parsed}, game_date=${syncDate}${target.league==='MLB'?' (MLB逐聯盟網址解析)':target.league==='NBA'?' (NBA獨立網址解析)':target.sport==='football'?' (足球短版/無核心球員)':''}`);
+          console.log(`${day.type} ${target.label} (${displayDayLabelForLeague(target.league, day.type)}): url=${url}, groups=${totalGroups}, finished_skipped=${rejectedFinished}, parsed=${parsed}, game_date=${syncDate}${US_SHIFT_LEAGUES.has(target.league)?' (美國時差：today=昨日 / tomorrow=今日)':target.sport==='football'?' (足球短版/無核心球員)':''}`);
         } catch(e) { console.warn(`${day.type} ${target.label} scrape failed: ${e.message}`); }
         finally { await page.close().catch(()=>{}); }
       }
@@ -423,50 +432,105 @@ async function safePageText(context, url){
   }catch(e){ console.warn('detail page failed:', url, e.message); return ''; }
   finally{ await page.close().catch(()=>{}); }
 }
+
+function strictSliceAround(text, key, radius = 220) {
+  const raw = String(text || '').replace(/\s+/g, ' ');
+  const k = String(key || '').trim();
+  if (!k) return raw.slice(0, radius);
+  const idx = raw.indexOf(k);
+  if (idx < 0) return '';
+  return raw.slice(Math.max(0, idx - radius), idx + k.length + radius);
+}
+function firstStrictNumber(text, regexes) {
+  const raw = String(text || '').replace(/\s+/g, ' ');
+  for (const re of regexes) {
+    const m = raw.match(re);
+    if (m && (m[1] || m[2])) return (m[1] || m[2]).trim();
+  }
+  return '待更新';
+}
+function strictPitcherStat(allText, pitcherName, field) {
+  const area = strictSliceAround(allText, pitcherName, 260) || String(allText || '').slice(0, 1200);
+  if (field === 'ERA') return firstStrictNumber(area, [/\bERA\b\s*[:：]?\s*(\d+(?:\.\d+)?)/i, /防禦率\s*[:：]?\s*(\d+(?:\.\d+)?)/]);
+  if (field === 'WHIP') return firstStrictNumber(area, [/\bWHIP\b\s*[:：]?\s*(\d+(?:\.\d+)?)/i]);
+  if (field === '勝投') return firstStrictNumber(area, [/(\d+)\s*勝/, /\bW\s*[:：]?\s*(\d+)\b/i]);
+  if (field === '敗投') return firstStrictNumber(area, [/(\d+)\s*敗/, /\bL\s*[:：]?\s*(\d+)\b/i]);
+  if (field === '近況') {
+    const v = pickUsefulSentences(area, [pitcherName, '近況', '最近', '先發'], 1);
+    return v && v.length <= 70 ? cleanAnalysisText(v) : '待更新';
+  }
+  return '待更新';
+}
+function strictTeamNumber(allText, team, labels) {
+  const area = strictSliceAround(allText, team, 280) || '';
+  if (!area) return '待更新';
+  for (const label of labels) {
+    const v = firstStrictNumber(area, [new RegExp(`${label}\\s*[:：]?\\s*(\\d+(?:\\.\\d+)?%?)`, 'i')]);
+    if (v !== '待更新') return v;
+  }
+  return '待更新';
+}
+function safeShortNote(text, keys) {
+  const v = cleanAnalysisText(pickUsefulSentences(text, keys, 1));
+  if (!v || v === '待更新' || v.length > 80) return '待更新';
+  return v;
+}
 function enrichGameFromTexts(game, battleText, teamTexts){
   const aj=game.analysis_json||{};
-  const allText=compactTextForAnalysis([battleText,...teamTexts.map(x=>x.text)].join(' '));
+  const allText=cleanAnalysisText(compactTextForAnalysis([battleText,...teamTexts.map(x=>x.text)].join(' ')));
   const away=aj.true_away || game.home;
   const home=aj.true_home || game.away;
-  const recentAway=pickUsefulSentences(allText,[away,'近況','近五場','最近','戰績'],2);
-  const recentHome=pickUsefulSentences(allText,[home,'近況','近五場','最近','戰績'],2);
-  aj.h2h = [[ '近期對戰', [away,'待更新'], [home,'待更新'], pickUsefulSentences(allText,['對戰','交手','歷史'],1) ]];
+
+  const recentAway=safeShortNote(strictSliceAround(allText, away, 360), [away,'近況','近五場','最近','戰績']);
+  const recentHome=safeShortNote(strictSliceAround(allText, home, 360), [home,'近況','近五場','最近','戰績']);
+  const h2hNote=safeShortNote(allText, ['對戰','交手','歷史']);
+  const injuryAway=safeShortNote(strictSliceAround(allText, away, 360), ['傷','缺陣','傷兵','injury']);
+  const injuryHome=safeShortNote(strictSliceAround(allText, home, 360), ['傷','缺陣','傷兵','injury']);
+
+  aj.h2h = [['近期對戰', [away,'待更新'], [home,'待更新'], h2hNote]];
   aj.recent = [
     {team: away, side:'客隊', items:[['近期', away, recentAway, '-']]},
     {team: home, side:'主隊', items:[['近期', home, recentHome, '-']]}
   ];
-  aj.injuries = [[away,'傷員狀況',pickUsefulSentences(allText,['傷','缺陣','傷兵','injury'],1),'-'],[home,'傷員狀況',pickUsefulSentences(allText,['傷','缺陣','傷兵','injury'],1),'-']];
+  aj.injuries = [[away,'傷員狀況',injuryAway,'-'],[home,'傷員狀況',injuryHome,'-']];
+
   if(game.sport==='baseball'){
-    const starterStats = name => [[ 'ERA', numericHint(allText,[name,'ERA','防禦率']) ],[ 'WHIP', numericHint(allText,[name,'WHIP']) ],[ '勝投', numericHint(allText,[name,'勝','W']) ],[ '敗投', numericHint(allText,[name,'敗','L']) ],[ '近況', pickUsefulSentences(allText,[name,'近況','最近','先發'],1) ]];
+    const starterStats = name => [
+      ['ERA', strictPitcherStat(allText, name, 'ERA')],
+      ['WHIP', strictPitcherStat(allText, name, 'WHIP')],
+      ['勝投', strictPitcherStat(allText, name, '勝投')],
+      ['敗投', strictPitcherStat(allText, name, '敗投')],
+      ['近況', strictPitcherStat(allText, name, '近況')]
+    ];
     if(Array.isArray(aj.starters)) aj.starters = aj.starters.map(s=>({...s, stats: starterStats(s.name||'')}));
     aj.metrics = [
-      ['打擊近況', numericHint(allText,[away,'打擊','得分','安打']), numericHint(allText,[home,'打擊','得分','安打']),50,50,'',''],
-      ['投手近況', numericHint(allText,[away,'防禦率','投手','失分']), numericHint(allText,[home,'防禦率','投手','失分']),50,50,'',''],
-      ['近五場', recentAway, recentHome,50,50,'',''],
-      ['主客場', numericHint(allText,[away,'客場','主場']), numericHint(allText,[home,'主場','客場']),50,50,'','']
+      ['打擊率', strictTeamNumber(allText, away, ['打擊率','AVG']), strictTeamNumber(allText, home, ['打擊率','AVG']),50,50,'',''],
+      ['場均得分', strictTeamNumber(allText, away, ['場均得分','得分']), strictTeamNumber(allText, home, ['場均得分','得分']),50,50,'',''],
+      ['團隊防禦率', strictTeamNumber(allText, away, ['防禦率','ERA']), strictTeamNumber(allText, home, ['防禦率','ERA']),50,50,'',''],
+      ['近五場', recentAway, recentHome,50,50,'','']
     ];
   } else if(game.sport==='basketball'){
     aj.metrics = [
-      ['場均得分', numericHint(allText,[away,'得分','場均']), numericHint(allText,[home,'得分','場均']),50,50,'',''],
-      ['場均失分', numericHint(allText,[away,'失分']), numericHint(allText,[home,'失分']),50,50,'',''],
-      ['近五場', recentAway, recentHome,50,50,'',''],
-      ['主客場表現', numericHint(allText,[away,'客場','主場']), numericHint(allText,[home,'主場','客場']),50,50,'','']
+      ['場均得分', strictTeamNumber(allText, away, ['場均得分','得分','PTS']), strictTeamNumber(allText, home, ['場均得分','得分','PTS']),50,50,'',''],
+      ['場均失分', strictTeamNumber(allText, away, ['場均失分','失分']), strictTeamNumber(allText, home, ['場均失分','失分']),50,50,'',''],
+      ['命中率', strictTeamNumber(allText, away, ['命中率','FG%']), strictTeamNumber(allText, home, ['命中率','FG%']),50,50,'',''],
+      ['近五場', recentAway, recentHome,50,50,'','']
     ];
-    if(Array.isArray(aj.core_players)) aj.core_players = aj.core_players.map(p=>({...p, name:'核心球員待更新', award: pickUsefulSentences(allText,[p.team,'主力','核心','得分','籃板','助攻'],1), stats:[[ '近況', pickUsefulSentences(allText,[p.team,'近況','最近'],1) ],['主客場', numericHint(allText,[p.team,'主場','客場'])],['傷停', pickUsefulSentences(allText,[p.team,'傷','缺陣'],1)]]}));
+    if(Array.isArray(aj.core_players)) aj.core_players = aj.core_players.map(p=>({...p, name:'核心球員待更新', award:'待更新', stats:[['場均得分', strictTeamNumber(allText,p.team,['場均得分','得分','PTS'])],['籃板', strictTeamNumber(allText,p.team,['籃板','REB'])],['助攻', strictTeamNumber(allText,p.team,['助攻','AST'])],['傷停', safeShortNote(strictSliceAround(allText,p.team,360),['傷','缺陣'])]]}));
   } else if(game.sport==='football'){
     aj.football_summary = {
       home: `${home}：${recentHome}`,
       away: `${away}：${recentAway}`,
-      conclusion: `綜合盤口方向、近期攻防與主客場狀態，本場先以 ${game.money}、${game.total} 作為主要參考。`
+      conclusion: `綜合盤口方向與近期狀態，本場先以 ${game.money}、${game.total} 作為主要參考。`
     };
     aj.metrics = [
-      ['近期進球', numericHint(allText,[away,'進球','攻擊']), numericHint(allText,[home,'進球','攻擊']),50,50,'',''],
-      ['近期失球', numericHint(allText,[away,'失球','防守']), numericHint(allText,[home,'失球','防守']),50,50,'',''],
+      ['近期進球', strictTeamNumber(allText, away, ['進球']), strictTeamNumber(allText, home, ['進球']),50,50,'',''],
+      ['近期失球', strictTeamNumber(allText, away, ['失球']), strictTeamNumber(allText, home, ['失球']),50,50,'',''],
       ['近五場', recentAway, recentHome,50,50,'',''],
-      ['歷史對戰', pickUsefulSentences(allText,['對戰','交手'],1), pickUsefulSentences(allText,['對戰','交手'],1),50,50,'','']
+      ['歷史對戰', h2hNote, h2hNote,50,50,'','']
     ];
   }
-  aj.detail_status = allText ? 'partial' : 'pending';
+  aj.detail_status = allText ? 'strict_partial' : 'pending';
   aj.source_note=''; aj.data_sources=[];
   game.analysis_json=aj;
   return game;
@@ -496,22 +560,22 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v67-detail-enrichment', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v68-strict-fields-timezone-fix', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 async function upsertDailyGames(rows) {
   const today = dateTW(0), tomorrow = dateTW(1);
-  // v67：今日與明日逐聯盟網址各自重抓，並嘗試補齊查看數據欄位。
+  // v68：逐聯盟網址各自重抓；MLB/NBA/WNBA 前台標籤採昨日/今日，且查看數據只填精準欄位。
   await supabaseRequest(`daily_games?game_day_type=in.(today,tomorrow)`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() }) }).catch(e=>console.warn('deactivate old today/tomorrow failed:', e.message));
-  if (!rows.length) { await writeSyncStatus('empty', 'v67 parsed 0 valid upcoming games for today/tomorrow', 0); return; }
+  if (!rows.length) { await writeSyncStatus('empty', 'v68 parsed 0 valid upcoming games', 0); return; }
   await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
-  await writeSyncStatus('success', `v67 synced ${rows.length} valid upcoming games`, rows.length);
+  await writeSyncStatus('success', `v68 synced ${rows.length} valid upcoming games`, rows.length);
 }
 async function main() {
   await waitUntilTaipeiDateReady();
   console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}), tomorrow=${dateTW(1)} (${mdTW(1)})`);
   const games = await scrapePlaySportWithBrowser();
-  console.log(`Parsed valid games v67: ${games.length}`);
+  console.log(`Parsed valid games v68: ${games.length}`);
   console.log(games.slice(0, 60).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   await upsertDailyGames(games);
   console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid upcoming games parsed for today/tomorrow.');
