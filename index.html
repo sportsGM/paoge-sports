@@ -1997,23 +1997,23 @@ v32RenderHotPicks();
 
 
 <script>
-/* ===== v33: custom VIP hot-pick modal + today/yesterday game mode ===== */
+/* ===== v65: custom VIP hot-pick modal + today/tomorrow game mode ===== */
 let v33DayMode = localStorage.getItem('pgai_day_mode') || 'today';
 let v33HotPickSelected = '';
 function v33DateByMode(mode){
   const d=new Date();
-  if(mode==='yesterday') d.setDate(d.getDate()-1);
+  if(mode==='tomorrow') d.setDate(d.getDate()+1);
   const y=d.getFullYear();
   const m=String(d.getMonth()+1).padStart(2,'0');
   const day=String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 }
 function v32Today(){ return v33DateByMode(v33DayMode); }
-function v33ModeLabel(){ return v33DayMode==='yesterday'?'昨日賽事':'今日賽事'; }
+function v33ModeLabel(){ return v33DayMode==='tomorrow'?'明日賽事':'今日賽事'; }
 function v33RenderDaySwitch(){
   const box=$('daySwitch');
   if(!box) return;
-  box.innerHTML=`<button class="day-btn ${v33DayMode==='today'?'active':''}" onclick="setGameDayMode('today')">今日賽事</button><button class="day-btn ${v33DayMode==='yesterday'?'active':''}" onclick="setGameDayMode('yesterday')">昨日賽事</button>`;
+  box.innerHTML=`<button class="day-btn ${v33DayMode==='today'?'active':''}" onclick="setGameDayMode('today')">今日賽事</button><button class="day-btn ${v33DayMode==='tomorrow'?'active':''}" onclick="setGameDayMode('tomorrow')">明日賽事</button>`;
 }
 function setGameDayMode(mode){
   v33DayMode=mode;
@@ -2033,7 +2033,7 @@ renderGames = function(){
   }
 };
 
-/* Keep game lists separate by date in DB key; yesterday can show same demo match list but isolated data */
+/* Keep game lists separate by date in DB key; today/tomorrow are isolated */
 function v32CurrentGameKey(){
   const list=games[state.league]||games.MLB;
   const g=list[currentGameIndex]||list[0];
@@ -2862,7 +2862,7 @@ setInterval(()=>{
 
 
 <script>
-/* ===== v53: daily_games hourly sync reader =====
+/* ===== v65: daily_games today/tomorrow sync reader =====
    GitHub Actions writes PlaySport/Yahoo/SofaScore-derived games into Supabase daily_games.
    Frontend reads that table and replaces static demo games when rows exist.
 */
@@ -2878,7 +2878,11 @@ function v52TodayTW(offsetDays=0){
   }
 }
 function v53DailyGamesDate(){
-  return (typeof v33DayMode!=='undefined' && v33DayMode==='yesterday') ? v52TodayTW(-1) : v52TodayTW(0);
+  return (typeof v33DayMode!=='undefined' && v33DayMode==='tomorrow') ? v52TodayTW(1) : v52TodayTW(0);
+}
+
+function v65GameDayType(){
+  return (typeof v33DayMode!=='undefined' && v33DayMode==='tomorrow') ? 'tomorrow' : 'today';
 }
 function v52NormalizeDailyGame(r){
   return {
@@ -2899,15 +2903,15 @@ async function v52LoadDailyGames(){
   if(!sbReady()) return;
   try{
     const rows=await sbFetch('daily_games',{
-      query:`?game_date=eq.${v53DailyGamesDate()}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=120`
+      query:`?game_date=eq.${v53DailyGamesDate()}&game_day_type=eq.${v65GameDayType()}&game_status=eq.upcoming&active=eq.true&select=*&order=game_time.asc,league.asc&limit=180`
     });
     if(!rows || !rows.length){
-      // v54: 如果今日同步抓不到，不要退回靜態示範賽事，避免前台誤以為有今日盤口。
+      // v54: 如果今日/明日同步抓不到，不要退回靜態示範賽事，避免前台誤以為有盤口。
       const keys=['MLB','NPB','CPBL','KBO','NBA','WNBA','CBA','足球','ECL','EPL','INT'];
       keys.forEach(k=>{ if(games[k]) games[k]=[]; });
       renderGames();
       const box=document.getElementById('games');
-      if(box) box.innerHTML='<div class="soft rounded-2xl p-6 text-center text-slate-400 font-black">目前沒有抓到此日期賽事資料；若同步失敗，原本今日資料會移到昨日賽事。</div>';
+      if(box) box.innerHTML='<div class="soft rounded-2xl p-6 text-center text-slate-400 font-black">目前沒有抓到此分類賽事資料；今日會自動排除已完賽，明日會顯示可預測賽事。</div>';
       const badge=document.querySelector('#gamesBlock .text-emerald-300');
       if(badge) badge.textContent='資料未抓到';
       return;
