@@ -4,8 +4,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
 
-// v83：搜尋引擎補數據試用版
-// 可用 provider：google / serpapi / tavily。沒有 SEARCH_API_KEY 時，仍會抓賽事與盤口，但搜尋補數據會跳過。
+// v85：Yahoo scoreboard 批次抓取 + Google 備援版
+// 搜尋 API 找到 Yahoo 奇摩運動 / 玩運彩連結後，會開啟詳情頁抽取投手、近期、對戰、隊伍比較等資訊。
 const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'google').toLowerCase();
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
 const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID || '';
@@ -307,7 +307,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v83-search-yahoo-playsport-daily-2am', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      parser_version: 'v85-yahoo-scoreboard-batch', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
       display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'),
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -449,12 +449,40 @@ async function safePageText(context, url){
   if(!url) return '';
   const page=await context.newPage();
   try{
-    await page.goto(url,{waitUntil:'domcontentloaded',timeout:25000});
-    try{ await page.waitForLoadState('networkidle',{timeout:8000}); }catch{}
-    await page.waitForTimeout(800);
+    await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+    try{ await page.waitForLoadState('networkidle',{timeout:10000}); }catch{}
+    await page.waitForTimeout(1200);
     return await page.evaluate(()=>document.body ? document.body.innerText : '');
   }catch(e){ console.warn('detail page failed:', url, e.message); return ''; }
   finally{ await page.close().catch(()=>{}); }
+}
+function isUsefulDetailUrl(url=''){
+  return /tw\.sports\.yahoo\.com|sports\.yahoo\.com|playsport\.cc\/gamesData|playsport\.cc\/predict/.test(String(url));
+}
+function rankDetailUrl(url=''){
+  const u=String(url);
+  if(/tw\.sports\.yahoo\.com/.test(u) && /(mlb|nba|wnba|soccer|basketball|scoreboard)/i.test(u)) return 0;
+  if(/sports\.yahoo\.com/.test(u)) return 1;
+  if(/playsport\.cc\/gamesData\/battle/.test(u)) return 2;
+  if(/playsport\.cc\/gamesData\/teams/.test(u)) return 3;
+  return 9;
+}
+async function fetchDetailTextsForGame(context, game, searchRows=[]){
+  const urls=[];
+  for(const r of searchRows){ if(r.link && isUsefulDetailUrl(r.link)) urls.push(r.link); }
+  const aj=game.analysis_json||{};
+  if(aj.battle_url) urls.push(aj.battle_url);
+  for(const t of (aj.team_urls||[])){ if(t.url) urls.push(t.url); }
+  const seen=new Set();
+  const selected=urls.filter(u=>u && !seen.has(u) && seen.add(u)).sort((a,b)=>rankDetailUrl(a)-rankDetailUrl(b)).slice(0,4);
+  const out=[];
+  for(const url of selected){
+    const text=await safePageText(context,url);
+    if(text) out.push({url,text});
+    await new Promise(r=>setTimeout(r,300));
+  }
+  if(out.length) console.log(`Fetched detail pages: ${game.league} ${game.home} vs ${game.away}, pages=${out.length}`);
+  return out;
 }
 
 function strictSliceAround(text, key, radius = 220) {
@@ -704,24 +732,180 @@ function enrichGameFromTexts(game, battleText, teamTexts){
   game.analysis_json=aj;
   return game;
 }
+
+const YAHOO_SCOREBOARD_URLS = {
+  MLB: 'https://tw.sports.yahoo.com/mlb/scoreboard/',
+  NBA: 'https://tw.sports.yahoo.com/nba/scoreboard/',
+  WNBA: 'https://tw.sports.yahoo.com/wnba/scoreboard/',
+  football: 'https://tw.sports.yahoo.com/soccer/scoreboard/'
+};
+function yahooLeagueKey(game){
+  if(game.league === 'MLB') return 'MLB';
+  if(game.league === 'NBA') return 'NBA';
+  if(game.league === 'WNBA') return 'WNBA';
+  if(game.sport === 'football') return 'football';
+  return '';
+}
+function teamTokens(name=''){
+  const t=cleanTeamName(name);
+  const arr=[t];
+  if(/[A-Za-z]/.test(t)){
+    const parts=t.split(/\s+/).filter(Boolean);
+    if(parts.length) arr.push(parts[parts.length-1]);
+  }
+  return [...new Set(arr.filter(x=>x && x.length>=2))];
+}
+function textContainsTeam(text, team){
+  const raw=String(text||'').toLowerCase();
+  return teamTokens(team).some(tok=>raw.includes(tok.toLowerCase()));
+}
+async function fetchYahooScoreboard(context, key){
+  const url=YAHOO_SCOREBOARD_URLS[key];
+  if(!url) return {url:'', text:'', links:[]};
+  const page=await context.newPage();
+  try{
+    console.log(`Opening Yahoo scoreboard batch: ${key} -> ${url}`);
+    await page.goto(url,{waitUntil:'domcontentloaded',timeout:45000});
+    try{ await page.waitForLoadState('networkidle',{timeout:12000}); }catch{}
+    await page.waitForTimeout(2500);
+    const data=await page.evaluate(()=>{
+      const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
+      const links=[...document.querySelectorAll('a')].map(a=>({text:norm(a.innerText||a.textContent||''), href:a.href||''}))
+        .filter(a=>a.href && /sports\.yahoo\.|tw\.sports\.yahoo\./.test(a.href));
+      return { text: document.body ? document.body.innerText : '', links };
+    });
+    console.log(`Yahoo scoreboard loaded: ${key}, links=${data.links.length}, textLen=${(data.text||'').length}`);
+    return {url, text:data.text||'', links:data.links||[]};
+  }catch(e){ console.warn(`Yahoo scoreboard failed ${key}:`, e.message); return {url, text:'', links:[]}; }
+  finally{ await page.close().catch(()=>{}); }
+}
+async function buildYahooScoreboardCache(context, games){
+  const keys=[...new Set(games.map(yahooLeagueKey).filter(Boolean))];
+  const cache={};
+  for(const k of keys){
+    cache[k]=await fetchYahooScoreboard(context,k);
+    await new Promise(r=>setTimeout(r,500));
+  }
+  return cache;
+}
+function yahooCandidateLinksFromScoreboard(game, board){
+  const away=(game.analysis_json||{}).true_away || game.home;
+  const home=(game.analysis_json||{}).true_home || game.away;
+  const links=(board?.links||[]).filter(a=>{
+    const hay=`${a.text} ${decodeURIComponent(a.href||'')}`;
+    return textContainsTeam(hay,away) && textContainsTeam(hay,home);
+  });
+  const seen=new Set();
+  return links.filter(x=>!seen.has(x.href)&&seen.add(x.href)).slice(0,3).map(x=>x.href);
+}
+function parseYahooPitcherStatsFromBlock(allText, pitcherName){
+  const raw=String(allText||'').replace(/\s+/g,' ');
+  const variants=teamTokens(pitcherName);
+  for(const v of variants){
+    const idx=raw.toLowerCase().indexOf(String(v).toLowerCase());
+    if(idx<0) continue;
+    const area=raw.slice(Math.max(0,idx-80), idx+260);
+    // Yahoo 常見：G. HOLMES RHP 3.78 3 2 48 24 1.30 防禦率 勝 敗 三振 四壞 WHIP
+    const after=area.slice(Math.max(0, area.toLowerCase().indexOf(String(v).toLowerCase())));
+    const nums=[...after.matchAll(/\b\d+(?:\.\d+)?\b/g)].map(m=>m[0]);
+    if(nums.length>=6 && /防禦率|ERA|WHIP|勝|敗/.test(after)){
+      return { ERA: nums[0], 勝投: nums[1], 敗投: nums[2], WHIP: nums[5], 近況: 'Yahoo 賽前頁已公布先發數據' };
+    }
+  }
+  return null;
+}
+function applyYahooScoreboardText(game, boardText){
+  if(!boardText) return false;
+  const aj=game.analysis_json||{};
+  const allText=cleanAnalysisText(boardText);
+  const away=aj.true_away || game.home;
+  const home=aj.true_home || game.away;
+  let changed=false;
+  if(game.sport==='baseball' && Array.isArray(aj.starters)){
+    aj.starters=aj.starters.map(s=>{
+      const found=parseYahooPitcherStatsFromBlock(allText, s.name||'');
+      if(found){ changed=true; return {...s, stats:[['ERA',found.ERA],['WHIP',found.WHIP],['勝投',found.勝投],['敗投',found.敗投],['近況',found.近況]]}; }
+      return s;
+    });
+  }
+  const recentAway=safeShortNote(strictSliceAround(allText, away, 520), [away,'RECENT GAMES','Recent Games','近況','最近','戰績','勝','敗']);
+  const recentHome=safeShortNote(strictSliceAround(allText, home, 520), [home,'RECENT GAMES','Recent Games','近況','最近','戰績','勝','敗']);
+  const h2h=safeShortNote(allText, ['TEAM MATCHUPS','Matchups','對戰','交手','歷史']);
+  if(recentAway!=='待更新' || recentHome!=='待更新'){
+    aj.recent=[
+      {team:away, side:'客隊', items:[['近期', away, recentAway, '-']]},
+      {team:home, side:'主隊', items:[['近期', home, recentHome, '-']]}
+    ]; changed=true;
+  }
+  if(h2h!=='待更新') { aj.h2h=[['近期對戰',[away,'-'],[home,'-'],h2h]]; changed=true; }
+  if(/TEAM COMPARISON|Team Comparison|Batting Average|Runs Scored|Home Runs|場均得分|命中率/.test(allText)){
+    const metricNote = safeShortNote(allText, ['TEAM COMPARISON','Batting Average','Runs Scored','Home Runs','場均得分','命中率']);
+    if(metricNote!=='待更新'){
+      aj.metrics = [
+        ['隊伍比較', metricNote, metricNote, 55, 45, '', ''],
+        ['獨贏方向', game.money, `${game.confidence?.[0]||58}%`, game.confidence?.[0]||58, 100-(game.confidence?.[0]||58), '', ''],
+        ['讓分方向', game.spread, `${game.confidence?.[1]||56}%`, game.confidence?.[1]||56, 100-(game.confidence?.[1]||56), '', ''],
+        ['大小分方向', game.total, `${game.confidence?.[2]||55}%`, game.confidence?.[2]||55, 100-(game.confidence?.[2]||55), '', '']
+      ]; changed=true;
+    }
+  }
+  if(changed){ aj.detail_status='yahoo_scoreboard_batch_enriched'; aj.source_note=''; aj.data_sources=[]; game.analysis_json=aj; }
+  return changed;
+}
+
 async function enrichGamesWithDetails(context, games){
   const limit = Math.min(SEARCH_ENRICH_LIMIT, games.length);
   if (!SEARCH_API_KEY) {
-    console.warn('SEARCH_API_KEY not set; search enrichment skipped. Using market model only.');
+    console.warn('SEARCH_API_KEY not set; Google fallback search skipped. Yahoo scoreboard batch will still run.');
+  } else {
+    console.log(`SEARCH_PROVIDER = ${SEARCH_PROVIDER}`);
+    if(SEARCH_PROVIDER === 'google') console.log(`Google Custom Search fallback enabled, GOOGLE_CSE_ID ${GOOGLE_CSE_ID ? 'found' : 'missing'}`);
   }
+
+  // v85：先用 Yahoo scoreboard 批次頁抓資料，不吃 Google 搜尋額度。
+  const yahooCache = await buildYahooScoreboardCache(context, games);
+  let yahooBatchHits = 0;
+
   for (let i=0; i<games.length; i++) {
     const game = games[i];
+    const key = yahooLeagueKey(game);
+    const board = key ? yahooCache[key] : null;
+    let detailPages = [];
     let searchRows = [];
-    if (i < limit && SEARCH_API_KEY) {
-      searchRows = await searchIntelForGame(game);
-      console.log(`Search enrichment ${i+1}/${limit}: ${game.league} ${game.away} vs ${game.home}, results=${searchRows.length}`);
+
+    // 先嘗試用該聯盟 Yahoo scoreboard 文字直接補數據。
+    if(board?.text && applyYahooScoreboardText(game, board.text)) yahooBatchHits++;
+
+    // 再從 scoreboard 找疑似單場連結，點進去抓詳細頁；這也不吃 Google 搜尋次數。
+    const yahooLinks = yahooCandidateLinksFromScoreboard(game, board);
+    for(const url of yahooLinks){
+      const text = await safePageText(context, url);
+      if(text) detailPages.push({url, text});
+      await new Promise(r=>setTimeout(r,250));
     }
-    // 先用搜尋摘要建立每場獨立分析；若沒有 key，也用盤口模型產生不空白的分析。
+
+    // 如果 Yahoo scoreboard 沒找到單場頁，才使用 Google 搜尋備援。
+    if (!detailPages.length && i < limit && SEARCH_API_KEY) {
+      searchRows = await searchIntelForGame(game);
+      console.log(`Google fallback ${i+1}/${limit}: ${game.league} ${game.away} vs ${game.home}, results=${searchRows.length}`);
+      detailPages = await fetchDetailTextsForGame(context, game, searchRows);
+    }
+
+    // 先用搜尋摘要/盤口模型建立每場獨立分析；沒有 key 也會用盤口模型產生不空白的分析。
     applySearchIntel(game, searchRows);
+
+    // 再用 Yahoo / 玩運彩詳情頁文字嚴格抽取數據欄位。
+    if(detailPages.length){
+      const joined = detailPages.map(x=>`URL:${x.url}\n${x.text}`).join('\n\n');
+      enrichGameFromTexts(game, joined, []);
+      game.analysis_json.detail_pages = detailPages.map(x=>x.url).slice(0,4);
+      game.analysis_json.detail_status = 'yahoo_detail_enriched';
+    }
   }
-  console.log(`Search/market analysis generated for ${games.length} games. provider=${SEARCH_PROVIDER}, searched=${SEARCH_API_KEY?limit:0}`);
+  console.log(`Yahoo scoreboard batch enrichment done. yahooBatchHits=${yahooBatchHits}, games=${games.length}, googleFallback=${SEARCH_API_KEY?limit:0}`);
   return games;
 }
+
 
 async function supabaseRequest(path, options = {}) {
   const url = `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/${path}`;
@@ -731,7 +915,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v71-clean-reset', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v85-yahoo-scoreboard-batch', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 
@@ -745,7 +929,7 @@ async function writeRawSportsData(rows) {
     const run = await supabaseRequest('raw_sports_sync_runs', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([{ source: 'github_actions', version: 'v83-search-yahoo-playsport-daily-2am', status: 'success', total_games: rows.length, created_at: nowISO() }])
+      body: JSON.stringify([{ source: 'github_actions', version: 'v85-yahoo-scoreboard-batch', status: 'success', total_games: rows.length, created_at: nowISO() }])
     });
     runId = Array.isArray(run) && run[0] ? run[0].id : null;
   } catch (e) { console.warn('raw_sports_sync_runs not written:', e.message); }
@@ -789,27 +973,27 @@ function dedupeGames(rows) {
   return out;
 }
 async function upsertDailyGames(rows) {
-  // v83 search reset：每次同步先刪除今日/明日/昨日顯示池，再寫入本次乾淨資料，避免 Supabase unique key 重複。
+  // v85 yahoo scoreboard batch：每次同步先刪除今日/明日/昨日顯示池，再寫入本次乾淨資料，避免 Supabase unique key 重複。
   const cleanRows = dedupeGames(rows).map(stripDailyRow);
   try { await writeRawSportsData(cleanRows); } catch(e) { console.warn('raw data center skipped:', e.message); }
   await supabaseRequest(`daily_games?game_day_type=in.(today,tomorrow,yesterday)`, {
     method: 'DELETE',
     headers: { Prefer: 'return=minimal' }
   }).catch(e=>console.warn('delete old display rows failed:', e.message));
-  if (!cleanRows.length) { await writeSyncStatus('empty', 'v83 parsed 0 valid games', 0); return; }
+  if (!cleanRows.length) { await writeSyncStatus('empty', 'v85 parsed 0 valid games', 0); return; }
   await supabaseRequest('daily_games', {
     method: 'POST',
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify(cleanRows)
   });
-  await writeSyncStatus('success', `v83 synced ${cleanRows.length} valid games`, cleanRows.length);
+  await writeSyncStatus('success', `v85 synced ${cleanRows.length} valid games`, cleanRows.length);
 }
 
 async function main() {
   await waitUntilTaipeiDateReady();
   console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}), tomorrow=${dateTW(1)} (${mdTW(1)})`);
   const games = await scrapePlaySportWithBrowser();
-  console.log(`Parsed valid games v83 search: ${games.length}`);
+  console.log(`Parsed valid games v85 yahoo scoreboard batch: ${games.length}`);
   console.log(games.slice(0, 60).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   await upsertDailyGames(games);
   console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid upcoming games parsed for today/tomorrow.');
