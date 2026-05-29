@@ -6,10 +6,12 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABA
 
 // v94：Yahoo 運動單場頁配對加強；用隊名別名 + 寬鬆候選連結補抓 TEAM MATCHUPS / RECENT GAMES
 // 玩運彩只抓賽事與運彩盤口；Yahoo 運動用指定日期 scoreboard 補 MLB / CPBL 等數據；OpenAI 可選用來統整所有數據成 AI 分析。
-const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'google').toLowerCase();
+const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'off').toLowerCase();
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
 const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID || '';
-const SEARCH_ENRICH_LIMIT = Number(process.env.SEARCH_ENRICH_LIMIT || 30);
+// v95: Google/Search API 備援先關閉，避免 403 造成 workflow 跑很久。
+const SEARCH_FALLBACK_ENABLED = String(process.env.SEARCH_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
+const SEARCH_ENRICH_LIMIT = Number(process.env.SEARCH_ENRICH_LIMIT || 0);
 const SEARCH_RESULTS_PER_QUERY = Number(process.env.SEARCH_RESULTS_PER_QUERY || 5);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-nano';
@@ -591,6 +593,7 @@ async function runSearch(query) {
   }
 }
 async function searchIntelForGame(game) {
+  if (!SEARCH_FALLBACK_ENABLED) return [];
   const queries = searchQueriesForGame(game);
   const out = [];
   for (const q of queries) {
@@ -1132,8 +1135,10 @@ async function enrichGamesWithApiLayer(games) {
 
 async function enrichGamesWithDetails(context, games){
   const limit = Math.min(SEARCH_ENRICH_LIMIT, games.length);
-  if (!SEARCH_API_KEY) {
-    console.warn('SEARCH_API_KEY not set; Google fallback search skipped. Yahoo scoreboard batch will still run.');
+  if (!SEARCH_FALLBACK_ENABLED) {
+    console.log('Search fallback disabled in v95; using PlaySport + Yahoo Sports scoreboard only.');
+  } else if (!SEARCH_API_KEY) {
+    console.warn('SEARCH_API_KEY not set; search fallback skipped. Yahoo scoreboard batch will still run.');
   } else {
     console.log(`SEARCH_PROVIDER = ${SEARCH_PROVIDER}`);
     if(SEARCH_PROVIDER === 'google') console.log(`Google Custom Search fallback enabled, GOOGLE_CSE_ID ${GOOGLE_CSE_ID ? 'found' : 'missing'}`);
@@ -1157,12 +1162,15 @@ async function enrichGamesWithDetails(context, games){
     const yahooLinks = yahooCandidateLinksFromScoreboard(game, board);
     for(const url of yahooLinks){
       const text = await safePageText(context, url);
-      if(text) detailPages.push({url, text});
+      const aj=game.analysis_json||{};
+      const away=aj.true_away || game.home;
+      const home=aj.true_home || game.away;
+      if(text && textContainsTeam(text, away) && textContainsTeam(text, home)) detailPages.push({url, text});
       await new Promise(r=>setTimeout(r,250));
     }
 
     // 如果 Yahoo scoreboard 沒找到單場頁，才使用 Google 搜尋備援。
-    if (!detailPages.length && i < limit && SEARCH_API_KEY) {
+    if (!detailPages.length && SEARCH_FALLBACK_ENABLED && i < limit && SEARCH_API_KEY) {
       searchRows = await searchIntelForGame(game);
       console.log(`Google fallback ${i+1}/${limit}: ${game.league} ${game.away} vs ${game.home}, results=${searchRows.length}`);
       detailPages = await fetchDetailTextsForGame(context, game, searchRows);
@@ -1180,7 +1188,7 @@ async function enrichGamesWithDetails(context, games){
     }
   }
   await enrichGamesWithApiLayer(games);
-  console.log(`Yahoo scoreboard batch enrichment done. yahooBatchHits=${yahooBatchHits}, games=${games.length}, googleFallback=${SEARCH_API_KEY?limit:0}`);
+  console.log(`Yahoo scoreboard batch enrichment done. yahooBatchHits=${yahooBatchHits}, games=${games.length}, googleFallback=${(SEARCH_FALLBACK_ENABLED && SEARCH_API_KEY)?limit:0}`);
   return games;
 }
 

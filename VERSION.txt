@@ -1,1 +1,1 @@
-v94 Yahoo 運動隊名配對加強版
+v95 no google fallback
