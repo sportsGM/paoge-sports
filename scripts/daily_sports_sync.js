@@ -4,8 +4,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
 
-// v88：MLB 官方 API + CPBL 官方/Yahoo 運動 + AI 統整版
-// 玩運彩只抓賽事與運彩盤口；MLB 官方 Stats API、CPBL 官方網站、Yahoo 運動補雙方數據；OpenAI 可選用來統整所有數據成 AI 分析。
+// v92：足球移除近期區塊 + 讓分無盤顯示無建議
+// 玩運彩只抓賽事與運彩盤口；Yahoo 運動用指定日期 scoreboard 補 MLB / CPBL 等數據；OpenAI 可選用來統整所有數據成 AI 分析。
 const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'google').toLowerCase();
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
 const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID || '';
@@ -21,16 +21,16 @@ const TARGETS = [
   { allianceId: 1, label: 'MLB', sport: 'baseball', league: 'MLB' },
   { allianceId: 2, label: '日本職棒', sport: 'baseball', league: 'NPB' },
   { allianceId: 6, label: '中華職棒', sport: 'baseball', league: 'CPBL' },
-  { allianceId: 9, label: '韓國職棒', sport: 'baseball', league: 'KBO' },
+  { allianceId: 9, label: '韓國職棒', sport: 'baseball', league: 'KBO' }, // 玩運彩韓棒分類使用 9；若改成 6 會和中職重複
   { allianceId: 3, label: 'NBA', sport: 'basketball', league: 'NBA' },
   { allianceId: 7, label: 'WNBA', sport: 'basketball', league: 'WNBA' },
   { allianceId: 94, label: '中國職籃', sport: 'basketball', league: 'CBA' },
   { allianceId: 4, label: '足球', sport: 'football', league: '足球' }
 ];
-const US_SHIFT_LEAGUES = new Set(['MLB','NBA','WNBA']);
+const TOMORROW_SOURCE_LEAGUES = new Set(['MLB','NBA','WNBA','足球']);
 function sourceDayForLeague(league) {
-  // MLB / NBA / WNBA 因美國時差，玩運彩要抓 gameday=tomorrow；其餘聯盟抓 gameday=today。
-  return US_SHIFT_LEAGUES.has(league) ? 'tomorrow' : 'today';
+  // 指定來源日：MLB / NBA / WNBA / 足球 從玩運彩 gameday=tomorrow；其他分類從 gameday=today。
+  return TOMORROW_SOURCE_LEAGUES.has(league) ? 'tomorrow' : 'today';
 }
 function displayDayForLeague() { return 'today'; }
 function displayDayLabelForLeague() { return '今日賽事'; }
@@ -129,11 +129,13 @@ function buildMarkets({ sport, awayTeam, homeTeam, spreadAway, spreadHome, money
   let spread = '盤口待確認';
   const spreadPick = chooseLowerOdd(spreadAway, spreadHome);
   if (sport === 'football') {
-    // 足球：玩運彩「不讓分」視為獨贏，前台用短標籤避免長隊名擠在盤口卡片。
-    if (moneyPick?.side === '客') spread = '客隊勝';
-    else if (moneyPick?.side === '主') spread = '主隊勝';
-    else if (moneyPick?.side === '和') spread = '和局';
-    else spread = '待確認';
+    // 足球：不讓分屬於獨贏，不可塞到讓分。若玩運彩沒有真正讓球盤，就顯示無建議。
+    if (spreadPick && spreadPick.line != null && Math.abs(Number(spreadPick.line)) > 0) {
+      const team = spreadPick.side === '客' ? awayTeam : homeTeam;
+      spread = `${team} ${displayLine(spreadPick.line)}`;
+    } else {
+      spread = '無建議';
+    }
   } else if (spreadPick && spreadPick.line != null) {
     const team = spreadPick.side === '客' ? awayTeam : homeTeam;
     spread = `${team} ${displayLine(spreadPick.line)}`;
@@ -144,7 +146,7 @@ function buildMarkets({ sport, awayTeam, homeTeam, spreadAway, spreadHome, money
   const total = totalLine != null ? `${totalPick?.side === '小' ? '小' : '大'} ${Math.abs(totalLine)}` : '大小待確認';
 
   const c0 = moneyPick?.odds ? Math.max(52, Math.min(76, Math.round(100 / moneyPick.odds))) : 60;
-  const c1 = spreadPick?.odds ? Math.max(52, Math.min(72, Math.round(100 / spreadPick.odds))) : 58;
+  const c1 = sport === 'football' && spread === '無建議' ? 50 : (spreadPick?.odds ? Math.max(52, Math.min(72, Math.round(100 / spreadPick.odds))) : 58);
   const c2 = totalPick?.odds ? Math.max(52, Math.min(70, Math.round(100 / totalPick.odds))) : 56;
   return { money, spread, total, confidence: [c0, c1, c2] };
 }
@@ -687,7 +689,7 @@ function enrichGameFromTexts(game, battleText, teamTexts){
     {team: away, side:'客隊', items:[['近期', away, recentAway, '-']]},
     {team: home, side:'主隊', items:[['近期', home, recentHome, '-']]}
   ];
-  aj.injuries = [[away,'傷員狀況',injuryAway,'-'],[home,'傷員狀況',injuryHome,'-']];
+  if(injuryAway !== '待更新' || injuryHome !== '待更新') aj.injuries = [[away,'傷員狀況',injuryAway,'-'],[home,'傷員狀況',injuryHome,'-']];
 
   if(game.sport==='baseball'){
     const starterStats = name => [
@@ -731,17 +733,22 @@ function enrichGameFromTexts(game, battleText, teamTexts){
   return game;
 }
 
-const YAHOO_SCOREBOARD_URLS = {
-  MLB: 'https://tw.sports.yahoo.com/mlb/scoreboard/',
-  NBA: 'https://tw.sports.yahoo.com/nba/scoreboard/',
-  WNBA: 'https://tw.sports.yahoo.com/wnba/scoreboard/',
-  football: 'https://tw.sports.yahoo.com/soccer/scoreboard/',
-  CPBL: [
-    'https://cpbl.com.tw/standings/season',
-    'https://cpbl.com.tw/stats/toplist',
-    'https://cpbl.com.tw/box'
-  ]
-};
+function yahooDateForLeagueKey(key){
+  // Yahoo 運動 scoreboard 日期：CPBL 使用台灣今天；MLB 因美國時差使用台灣日期 +1。
+  if(key === 'MLB') return dateTW(1);
+  return dateTW(0);
+}
+function yahooScoreboardUrls(key){
+  const d = yahooDateForLeagueKey(key);
+  const urls = {
+    MLB: [`https://tw.sports.yahoo.com/mlb/scoreboard/?date=${d}`],
+    NBA: [`https://tw.sports.yahoo.com/nba/scoreboard/?date=${d}`],
+    WNBA: [`https://tw.sports.yahoo.com/wnba/scoreboard/?date=${d}`],
+    football: [`https://tw.sports.yahoo.com/soccer/scoreboard/?date=${d}`],
+    CPBL: [`https://tw.sports.yahoo.com/cpbl/scoreboard/?date=${d}`]
+  };
+  return urls[key] || [];
+}
 function yahooLeagueKey(game){
   if(game.league === 'MLB') return 'MLB';
   if(game.league === 'CPBL') return 'CPBL';
@@ -764,9 +771,8 @@ function textContainsTeam(text, team){
   return teamTokens(team).some(tok=>raw.includes(tok.toLowerCase()));
 }
 async function fetchYahooScoreboard(context, key){
-  const rawUrls=YAHOO_SCOREBOARD_URLS[key];
-  if(!rawUrls) return {url:'', text:'', links:[]};
-  const urls=Array.isArray(rawUrls) ? rawUrls : [rawUrls];
+  const urls=yahooScoreboardUrls(key);
+  if(!urls.length) return {url:'', text:'', links:[]};
   const combined={url:urls.join(' | '), text:'', links:[]};
   for(const url of urls){
     const page=await context.newPage();
@@ -1147,7 +1153,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v88-cpbl-official-ai', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v89-requested-fixes', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 

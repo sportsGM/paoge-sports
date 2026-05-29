@@ -726,7 +726,7 @@ function shortFootballMarket(val,type){
   if(/客隊|客勝/.test(raw)) return '客隊勝';
   if(/主隊|主勝/.test(raw)) return '主隊勝';
   if(/獨贏/.test(raw)) return raw.replace(/獨贏\s*/,'') || '獨贏待確認';
-  if(type==='spread' && /待確認|盤口/.test(raw)) return '待確認';
+  if(type==='spread' && (/待確認|盤口|無建議/.test(raw) || !raw)) return '無建議';
   return raw.length>8 ? raw.slice(0,8)+'…' : (raw || '待確認');
 }
 function marketMini(label,val,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-xl border ${cls} p-2 overflow-hidden"><div class="text-[11px] font-black">${label}</div><div class="market mt-1 truncate" title="${String(val||'')}">${val}</div></div>`; }
@@ -753,10 +753,22 @@ function buildGameData(g){
     const players=aj.core_players.map(x=>({team:x.team||'',name:String(x.name||'核心球員待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩/g,''),role:x.role||'隊伍資料',award:String(x.award||'近期狀態待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,''),stats:cleanStats(x.stats,[["近況","待更新"],["主客場","待更新"],["傷停","待更新"]])}));
     copy.top=players;
   }
-  if(Array.isArray(aj.metrics)&&aj.metrics.length) copy.metrics=aj.metrics;
-  if(Array.isArray(aj.injuries)&&aj.injuries.length) copy.injuries=aj.injuries;
-  if(Array.isArray(aj.h2h)&&aj.h2h.length) copy.h2h=aj.h2h;
-  if(Array.isArray(aj.recent)&&aj.recent.length) copy.recent=aj.recent;
+  // 動態賽事不要沿用展示版舊資料：沒有真的抓到就不顯示，避免雙方數據重複或顯示錯場。
+  copy.injuries=[];
+  copy.metrics=[];
+  copy.h2h=[];
+  copy.recent=[];
+  const isRealValue=v=>{
+    const t=String(v||'').trim();
+    return t && !/待更新|資料整理中|未公布|^-$/.test(t);
+  };
+  if(Array.isArray(aj.metrics)&&aj.metrics.length) copy.metrics=aj.metrics.filter(m=>Array.isArray(m)&&m.some(isRealValue));
+  if(Array.isArray(aj.injuries)&&aj.injuries.length){
+    const realInj=aj.injuries.filter(r=>Array.isArray(r)&&r.some(isRealValue));
+    if(realInj.length) copy.injuries=realInj;
+  }
+  if(Array.isArray(aj.h2h)&&aj.h2h.length) copy.h2h=aj.h2h.filter(r=>Array.isArray(r)&&r.some(isRealValue));
+  if(Array.isArray(aj.recent)&&aj.recent.length) copy.recent=aj.recent.filter(r=>r&&Array.isArray(r.items)&&r.items.some(item=>Array.isArray(item)&&item.some(isRealValue)));
   return copy;
 }
 function gameDisplayTitle(g){ return `${g.away} vs ${g.home}`; }
@@ -766,9 +778,10 @@ function openGame(i,tab='data'){
   $('gameModal').classList.remove('hidden'); document.body.classList.add('modal-open');
   $('modalLeague').textContent=`${state.league}｜${g.time}`;
   $('modalTitle').textContent=gameDisplayTitle(g);
+  const optionalSection=(title,rows,renderer)=>Array.isArray(rows)&&rows.length?section(title,renderer(rows)):'';
   const dataHtml = g.sport==='football'
-    ? `${summaryCards(g)}${searchIntelBlock(g)}${section('雙方近況分析',footballAnalysis(d,g))}${section('近期對戰',h2h(d.h2h))}${section('近期賽況',recent(d.recent))}`
-    : `${summaryCards(g)}${searchIntelBlock(g)}${section(d.topTitle,topBlock(d.top,g.sport))}${section('傷員狀況',injuries(d.injuries,g.sport))}${section('雙方對比',comparison(d.metrics,g.away,g.home))}${section('雙方歷史對戰',h2h(d.h2h))}${section('雙方近期賽況',recent(d.recent))}`;
+    ? `${summaryCards(g)}${searchIntelBlock(g)}${section('雙方近況分析',footballAnalysis(d,g))}${optionalSection('雙方對比',d.metrics,(rows)=>comparison(rows,g.away,g.home))}`
+    : `${summaryCards(g)}${searchIntelBlock(g)}${section(d.topTitle,topBlock(d.top,g.sport))}${optionalSection('傷員狀況',d.injuries,(rows)=>injuries(rows,g.sport))}${optionalSection('雙方對比',d.metrics,(rows)=>comparison(rows,g.away,g.home))}${optionalSection('雙方歷史對戰',d.h2h,h2h)}${optionalSection('雙方近期賽況',d.recent,recent)}`;
   const boardHtml=`${section('',pundits(g))}${section('',playerComments())}`;
   $('modalBody').innerHTML=`<div class="comment-tabs"><button class="comment-tab ${tab==='data'?'active':''}" onclick="openGame(${i},'data')">查看數據</button><button class="comment-tab ${tab==='board'?'active':''}" onclick="openGame(${i},'board')">留言板</button></div>${tab==='data'?dataHtml:boardHtml}`;
 }
@@ -777,7 +790,7 @@ function summaryCards(g){
   const money = g.sport==='football' ? shortFootballMarket(g.money,'money') : g.money;
   const spread = g.sport==='football' ? shortFootballMarket(g.spread,'spread') : g.spread;
   const total = shortFootballMarket(g.total,'total');
-  return `<section class="grid lg:grid-cols-3 gap-4">${mainMarket('獨贏參考',money,g.conf[0],'大眾參考方向','emerald')}${mainMarket(g.sport==='football'?'讓分參考':'讓分盤',spread,g.conf[1],g.sport==='football'?'盤口待補':'過盤參考率','blue')}${mainMarket('大小分',total,g.conf[2],'方向參考率','pink')}</section>`;
+  return `<section class="grid lg:grid-cols-3 gap-4">${mainMarket('獨贏參考',money,g.conf[0],'大眾參考方向','emerald')}${mainMarket(g.sport==='football'?'讓分參考':'讓分盤',spread,g.conf[1],g.sport==='football'?'讓分參考率':'過盤參考率','blue')}${mainMarket('大小分',total,g.conf[2],'方向參考率','pink')}</section>`;
 }
 
 function searchIntelBlock(g){
@@ -800,7 +813,7 @@ function footballAnalysis(d,g){
   const con=String(fs.conclusion||'系統會依近期狀態、主客場表現與盤口方向更新分析。').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
   return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-amber-400/20 p-4"><div class="text-amber-300 font-black mb-2">主隊｜${g.away}</div><p class="text-slate-300 font-bold leading-7">${homeTxt}</p></div><div class="rounded-2xl bg-slate-900/75 border border-blue-400/20 p-4"><div class="text-blue-300 font-black mb-2">客隊｜${g.home}</div><p class="text-slate-300 font-bold leading-7">${awayTxt}</p></div><div class="md:col-span-2 rounded-2xl bg-slate-950 border border-slate-800 p-4"><div class="text-emerald-300 font-black mb-2">AI綜合判斷</div><p class="text-slate-300 font-bold leading-7">${con}</p></div></div>`;
 }
-function topBlock(rows,sport){ if(sport==='football'){ const left=rows.slice(0,3), right=rows.slice(3,6); return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-a mb-3">${left[0].team}</div><div class="space-y-3">${left.map((r,idx)=>footballPlayer(r,idx+1,'a')).join('')}</div></div><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-b mb-3">${right[0].team}</div><div class="space-y-3">${right.map((r,idx)=>footballPlayer(r,idx+1,'b')).join('')}</div></div></div>`; } return `<div class="grid md:grid-cols-2 gap-4">${rows.map(r=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="text-sm text-slate-500">${r.team}</div><div class="text-xl font-black mt-1">${r.name} <span class="hero-tag">${r.role}</span></div><div class="inline-stats mt-4 pitcher-stats">${r.stats.map(s=>`<div class="inline-stat"><div class="v">${s[1]}</div><div class="k">${s[0]}</div></div>`).join('')}</div></div>`).join('')}</div>`; }
+function topBlock(rows,sport){ if(sport==='football'){ const left=rows.slice(0,3), right=rows.slice(3,6); return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-a mb-3">${left[0]?.team||''}</div><div class="space-y-3">${left.map((r,idx)=>footballPlayer(r,idx+1,'a')).join('')}</div></div><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-b mb-3">${right[0]?.team||''}</div><div class="space-y-3">${right.map((r,idx)=>footballPlayer(r,idx+1,'b')).join('')}</div></div></div>`; } return `<div class="grid md:grid-cols-2 gap-4">${rows.map(r=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="text-sm text-slate-500">${r.team}</div><div class="text-xl font-black mt-1">${r.name} <span class="hero-tag">${r.role}</span></div><div class="inline-stats mt-4 pitcher-stats">${r.stats.map(s=>{const k=String(s[0]||''); const isNote=/近況|狀態|備註/.test(k); return `<div class="inline-stat ${isNote?'note-stat':''}"><div class="v ${isNote?'note-value':''}">${s[1]}</div><div class="k">${s[0]}</div></div>`}).join('')}</div></div>`).join('')}</div>`; }
 function footballPlayer(r,no,tone){ return `<div class="rounded-2xl ${tone==='a'?'bg-sky-400/5 border-sky-400/20':'bg-amber-400/5 border-amber-400/20'} border p-4"><div class="flex items-center justify-between gap-3"><div><div class="text-sm font-black ${tone==='a'?'text-blue-300':'text-amber-300'}">第 ${no} 核心</div><div class="text-lg font-black mt-1">${r.name}</div></div><span class="hero-tag">${r.role}</span></div><div class="text-xs text-slate-400 mt-2 leading-5">${r.award||''}</div></div>`; }
 function injuries(rows,sport){ if(sport==='baseball'){ const teams=[...new Set(rows.map(r=>r[0]))]; return `<div class="grid md:grid-cols-2 gap-4">${teams.map((team,idx)=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="font-black ${idx===0?'text-blue-300':'text-amber-300'} mb-3">${team}</div><div class="space-y-2">${rows.filter(r=>r[0]===team).map(r=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 flex justify-between gap-3"><div><div class="font-black text-sm">${r[1]}</div><div class="text-xs text-slate-400 mt-1">${r[2]}</div></div><div class="text-xs text-pink-300 font-black shrink-0">${r[3]}</div></div>`).join('')}</div></div>`).join('')}</div>`; } return `<div class="grid md:grid-cols-2 gap-2">${rows.map(r=>`<div class="rounded-xl bg-slate-900/75 border border-slate-800 p-3 flex justify-between gap-3"><div><div class="font-black">${r[0]}｜${r[1]}</div><div class="text-sm text-slate-400 mt-1">${r[2]}</div></div><div class="text-xs text-pink-300 font-black shrink-0">${r[3]}</div></div>`).join('')}</div>`; }
 function comparison(metrics,away,home){ return `<div class="space-y-4">${metrics.map(m=>`<div><div class="grid grid-cols-[78px_1fr_78px] md:grid-cols-[130px_1fr_130px] gap-3 items-center"><div><div class="font-black text-blue-300">${m[1]}</div><div class="text-[11px] text-slate-500">${m[5]}</div></div><div><div class="flex justify-between text-sm font-black mb-2"><span>${away}</span><span>${m[0]}</span><span>${home}</span></div><div class="comp-bar" style="--l:${m[3]}%;--r:${m[4]}%"><span class="midline"></span></div></div><div class="text-right"><div class="font-black text-amber-300">${m[2]}</div><div class="text-[11px] text-slate-500">${m[6]}</div></div></div></div>`).join('')}</div>`; }
