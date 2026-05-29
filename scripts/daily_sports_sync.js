@@ -16,6 +16,22 @@ const TARGETS = [
   { label: '足球', sport: 'football', league: '足球' }
 ];
 
+function taipeiParts() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+  }).formatToParts(new Date()).reduce((acc, p) => (acc[p.type] = p.value, acc), {});
+  return { year: parts.year, month: parts.month, day: parts.day, hour: Number(parts.hour), minute: Number(parts.minute), second: Number(parts.second) };
+}
+async function waitUntilTaipeiDateReady() {
+  const t = taipeiParts();
+  // 台灣時間剛跨日 00:00 時，玩運彩日期按鈕可能還沒完全刷新；等到 00:01:10 再抓。
+  if (t.hour === 0 && t.minute === 0) {
+    const waitMs = Math.max(0, (70 - t.second) * 1000);
+    console.log(`Taipei time is 00:00:${String(t.second).padStart(2,'0')}; waiting ${Math.ceil(waitMs/1000)}s until 00:01 before syncing.`);
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+  }
+}
 function dateTW(offsetDays = 0) {
   const now = new Date();
   now.setDate(now.getDate() + offsetDays);
@@ -24,6 +40,10 @@ function dateTW(offsetDays = 0) {
 function mdTW(offsetDays = 0) {
   const d = dateTW(offsetDays).split('-');
   return `${d[1]}/${d[2]}`;
+}
+function twDateLabel(offsetDays = 0) {
+  const [y,m,d] = dateTW(offsetDays).split('-');
+  return { iso: `${y}-${m}-${d}`, mmdd: `${m}/${d}`, compact: `${m}${d}`, loose: `${Number(m)}/${Number(d)}` };
 }
 function nowISO() { return new Date().toISOString(); }
 function normalize(s = '') { return String(s).replace(/\u00a0/g, ' ').replace(/[\t ]+/g, ' ').replace(/\n\s*/g, '\n').trim(); }
@@ -223,7 +243,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v62-football-nba-fixed', true_away: awayTeam, true_home: homeTeam,
+      parser_version: 'v64-taiwan-date-autoclick', true_away: awayTeam, true_home: homeTeam,
       display_order: 'home_first', competition, sport_label: target.label,
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -248,21 +268,38 @@ async function clickByText(page, label) {
   try { await page.locator(`text=${label}`).first().click({ timeout: 5000 }); await page.waitForTimeout(1500); return true; } catch {}
   return false;
 }
-async function clickTodayDate(page) {
-  const today = mdTW(0);
-  const clicked = await page.evaluate((today) => {
-    const [mm, dd] = today.split('/');
+async function clickTaiwanTodayDate(page) {
+  const target = twDateLabel(0);
+  const clicked = await page.evaluate((target) => {
+    const candidates = [target.mmdd, target.loose, target.compact];
     const els = [...document.querySelectorAll('a,button,td,div,span')];
-    const hit = els.find(el => {
+    const visible = el => {
+      const r = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const score = el => {
       const txt = (el.innerText || el.textContent || '').replace(/\s+/g, '');
-      return txt.includes(`${mm}/${dd}`) || txt.includes(`${Number(mm)}/${Number(dd)}`) || txt.includes(`${mm}${dd}`);
-    });
-    if (hit) { hit.click(); return true; }
-    return false;
-  }, today);
-  if (clicked) await page.waitForTimeout(2500);
-  return clicked;
+      if (!candidates.some(c => txt.includes(c))) return -1;
+      let s = 1;
+      if (/date|day|current|active|select|selected/i.test(el.className || '')) s += 3;
+      if (['A','BUTTON','TD'].includes(el.tagName)) s += 2;
+      if (txt.length <= 12) s += 2;
+      return s;
+    };
+    const hit = els.filter(visible).map(el => ({ el, s: score(el) })).filter(x => x.s >= 0).sort((a,b)=>b.s-a.s)[0]?.el;
+    if (hit) { hit.click(); return { clicked: true, text: (hit.innerText || hit.textContent || '').trim() }; }
+    return { clicked: false, text: '' };
+  }, target);
+  if (clicked?.clicked) {
+    console.log(`Clicked Taiwan date ${target.mmdd}: ${clicked.text}`);
+    await page.waitForTimeout(2500);
+    return true;
+  }
+  console.warn(`Taiwan date button ${target.mmdd} not found; continuing with current PlaySport page date.`);
+  return false;
 }
+async function clickTodayDate(page) { return clickTaiwanTodayDate(page); }
 async function extractGroups(page) {
   return await page.evaluate(() => {
     const norm = s => String(s || '').replace(/\u00a0/g, ' ').trim();
@@ -304,7 +341,7 @@ async function scrapePlaySportWithBrowser() {
         const groups = await extractGroups(page);
         let parsed = 0;
         for (const group of groups) { const g = convertGroupToGame(group, target, page.url()); if (g) { games.push(g); parsed++; } }
-        console.log(`${target.label}: groups=${groups.length}, parsed=${parsed}, date=${dateTW(0)}${target.league==='NBA'?' (NBA獨立解析器)':target.sport==='football'?' (足球短盤口/近況版)':''}`);
+        console.log(`${target.label}: groups=${groups.length}, parsed=${parsed}, taiwan_date=${dateTW(0)}${target.league==='MLB'?' (MLB台灣日期自動點選版)':target.league==='NBA'?' (NBA獨立解析器)':target.sport==='football'?' (足球短盤口/近況版)':''}`);
       } catch(e) { console.warn(`${target.label} scrape failed: ${e.message}`); }
       finally { await page.close().catch(()=>{}); }
     }
@@ -321,10 +358,10 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v62-data-center', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v64-data-center', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
-async function archiveTodayToYesterday(reason = 'v62 parsed 0 valid games') {
+async function archiveTodayToYesterday(reason = 'v64 parsed 0 valid games') {
   const today = dateTW(0), yesterday = dateTW(-1);
   let rows = [];
   try { rows = await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true&select=*`) || []; } catch(e) { console.warn(e.message); }
@@ -336,14 +373,16 @@ async function archiveTodayToYesterday(reason = 'v62 parsed 0 valid games') {
 }
 async function upsertDailyGames(rows) {
   const today = dateTW(0);
-  if (!rows.length) { await archiveTodayToYesterday('v62 parsed 0 valid games'); return; }
+  if (!rows.length) { await archiveTodayToYesterday('v64 parsed 0 valid games'); return; }
   await supabaseRequest(`daily_games?game_date=eq.${today}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() }) });
   await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
-  await writeSyncStatus('success', `v62 synced ${rows.length} valid games`, rows.length);
+  await writeSyncStatus('success', `v64 synced ${rows.length} valid games`, rows.length);
 }
 async function main() {
+  await waitUntilTaipeiDateReady();
+  console.log(`Taiwan sync date: ${dateTW(0)} (${mdTW(0)})`);
   const games = await scrapePlaySportWithBrowser();
-  console.log(`Parsed valid games: ${games.length}`);
+  console.log(`Parsed valid games v64: ${games.length}`);
   console.log(games.slice(0, 40).map(g => `${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   await upsertDailyGames(games);
   console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed; archived today if needed.');
