@@ -2,10 +2,7 @@ import { chromium } from 'playwright';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
-}
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
 
 const BASE_URL = 'https://www.playsport.cc/predict/games?allianceid=1&from=header';
 const TARGETS = [
@@ -22,301 +19,219 @@ const TARGETS = [
 function dateTW(offsetDays = 0) {
   const now = new Date();
   now.setDate(now.getDate() + offsetDays);
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit'
-  }).format(now);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
-
+function mdTW(offsetDays = 0) {
+  const d = dateTW(offsetDays).split('-');
+  return `${d[1]}/${d[2]}`;
+}
 function nowISO() { return new Date().toISOString(); }
-
-function normalizeSpaces(s = '') {
-  return String(s).replace(/\u00a0/g, ' ').replace(/[\t ]+/g, ' ').replace(/\n\s*/g, '\n').trim();
-}
-function oneLine(s = '') { return normalizeSpaces(s).replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim(); }
-function onlyText(s = '') { return oneLine(s).replace(/[○◎●◯]/g, '').trim(); }
-
-function cleanTeamName(name = '') {
-  return onlyText(name)
-    .replace(/^(\d{2,5}|AM|PM|對戰資訊|客隊|主隊|客|主|和)\s*/i, '')
-    .replace(/^(MLB|NBA|WNBA|CPBL|NPB|KBO|CBA|足球|棒球|籃球|日本職棒|中華職棒|韓國職棒|中國職籃)\s*/i, '')
-    .replace(/\b(Grant|Lucas|Taj|Chris|Paxton|Jared|Trevor|Holmes|Giolito|Bradley|Paddack|Schultz|Jones|Rogers)\b.*$/i, '')
+function normalize(s = '') { return String(s).replace(/\u00a0/g, ' ').replace(/[\t ]+/g, ' ').replace(/\n\s*/g, '\n').trim(); }
+function lines(s = '') { return normalize(s).split('\n').map(x => x.replace(/[○◎●◯]/g, '').trim()).filter(Boolean); }
+function oneLine(s = '') { return normalize(s).replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim(); }
+function cleanTeamName(s = '') {
+  return oneLine(s)
+    .replace(/^(客隊|主隊|客|主|和|V\.S\.|VS|對戰資訊|AM|PM)\s*/i, '')
+    .replace(/^\d{1,5}\s*$/, '')
+    .replace(/^[\d.\-+]+\s*/, '')
     .replace(/[,，|｜:：]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
-
-function parseTeamCell(text = '', sport = 'baseball') {
-  const lines = normalizeSpaces(text).split('\n').map(x => onlyText(x)).filter(Boolean);
-  let team = lines[0] || onlyText(text);
-  let detail = '';
-  if (sport === 'baseball') {
-    detail = lines.slice(1).join(' ') || '';
-  } else {
-    detail = lines.slice(1).join(' ') || '';
-  }
-  team = cleanTeamName(team);
-  return { team, detail };
-}
-
-function extractTime(text = '') {
-  const m = oneLine(text).match(/\b(?:AM|PM)\s*\d{1,2}:\d{2}\b|\b\d{1,2}:\d{2}\b/i);
-  return m ? m[0].replace(/\s+/, ' ').toUpperCase() : '';
-}
-
 function isBadTeamName(s = '') {
   const t = cleanTeamName(s);
-  if (!t || t.length < 2 || t.length > 18) return true;
+  if (!t || t.length < 2 || t.length > 24) return true;
   if (/^[\d\s.\-+]+$/.test(t)) return true;
-  if (/^[SV]\.?\s*\d/i.test(t)) return true;
-  if (/賽事資訊|球隊資訊|運彩盤|國際盤|預測賽事|請先登入|日期/.test(t)) return true;
-  if (/讓分|大小|不讓分|獨贏|客\d|主\d|和\d/.test(t)) return true;
+  if (/^[SV]\.\s*\d/i.test(t)) return true;
+  if (/賽事資訊|球隊資訊|運彩盤|國際盤|預測賽事|請先登入|日期|讓分|大小|不讓分|獨贏/.test(t)) return true;
   return false;
 }
-
-function parseNumber(s = '') {
-  const m = String(s).replace(/,/g, ' ').match(/[+-]?\d+(?:\.\d+)?/);
-  return m ? Number(m[0]) : null;
+function extractTime(s = '') {
+  const m = oneLine(s).match(/\b(?:AM|PM)\s*\d{1,2}:\d{2}\b|\b\d{1,2}:\d{2}\b/i);
+  return m ? m[0].replace(/\s+/, ' ').toUpperCase() : '';
 }
-
-function parseOddsLine(text = '') {
-  const raw = oneLine(text);
+function pickByClass(row, cls) { return row.cells.find(c => c.cls.includes(cls)); }
+function clsHas(cell, cls) { return cell?.cls?.includes(cls); }
+function parseNumberList(s = '') { return [...String(s).matchAll(/[+-]?\d+(?:\.\d+)?/g)].map(m => Number(m[0])); }
+function parseMarket(text = '') {
+  const raw = oneLine(text).replace(/\s*,\s*/g, ', ');
   const side = raw.includes('客') ? '客' : raw.includes('主') ? '主' : raw.includes('和') ? '和' : raw.includes('大') ? '大' : raw.includes('小') ? '小' : '';
-  const lineMatch = raw.match(/(?:客|主|大|小)\s*([+-]?\d+(?:\.\d+)?)/);
-  const allNums = [...raw.matchAll(/[+-]?\d+(?:\.\d+)?/g)].map(m => Number(m[0]));
-  let line = lineMatch ? Number(lineMatch[1]) : null;
-  let odds = null;
-  if (allNums.length >= 2) odds = allNums[allNums.length - 1];
-  else if (allNums.length === 1 && !lineMatch) odds = allNums[0];
+  const nums = parseNumberList(raw);
+  let line = null, odds = null;
+  if (side === '大' || side === '小') {
+    line = nums[0] ?? null;
+    odds = nums.length > 1 ? nums[nums.length - 1] : null;
+  } else if (side === '客' || side === '主') {
+    // 讓分盤有 +1.5/-1.5；不讓分只有賠率。由 class 決定用途。
+    line = nums[0] ?? null;
+    odds = nums.length > 1 ? nums[nums.length - 1] : nums[0] ?? null;
+  } else if (side === '和') {
+    odds = nums[0] ?? null;
+  }
   return { raw, side, line, odds };
 }
-
-function chooseLowerOdd(a, b) {
-  if (a?.odds && b?.odds) return a.odds <= b.odds ? a : b;
-  return a || b;
+function chooseLowerOdd(a, b, c = null) {
+  return [a,b,c].filter(x => x && typeof x.odds === 'number' && x.odds > 0).sort((x,y)=>x.odds-y.odds)[0] || a || b || c || null;
 }
-
+function displayLine(n) { return n == null ? '' : `${n > 0 ? '+' : ''}${n}`; }
 function buildMarkets({ sport, awayTeam, homeTeam, spreadAway, spreadHome, moneyAway, moneyHome, moneyDraw, totalOver, totalUnder }) {
-  // awayTeam = 玩運彩客隊；homeTeam = 玩運彩主隊。
-  const favMoney = chooseLowerOdd(moneyAway, moneyHome);
-  const moneyTeam = favMoney?.side === '客' ? awayTeam : homeTeam;
-  const money = sport === 'football' && moneyDraw?.odds && moneyDraw.odds < Math.min(moneyAway?.odds || 99, moneyHome?.odds || 99)
-    ? '和局'
-    : `${moneyTeam || homeTeam || awayTeam}勝${favMoney?.odds ? ` ${favMoney.odds}` : ''}`;
+  const moneyPick = sport === 'football' ? chooseLowerOdd(moneyAway, moneyHome, moneyDraw) : chooseLowerOdd(moneyAway, moneyHome);
+  const moneyTeam = moneyPick?.side === '客' ? awayTeam : moneyPick?.side === '主' ? homeTeam : '和局';
+  const money = moneyPick?.side === '和' ? '和局' : `${moneyTeam || homeTeam || awayTeam}勝`;
 
-  const favSpread = chooseLowerOdd(spreadAway, spreadHome);
-  const spreadTeam = favSpread?.side === '客' ? awayTeam : homeTeam;
-  const spreadLine = favSpread?.line;
-  const spread = (spreadTeam && spreadLine !== null && spreadLine !== undefined)
-    ? `${spreadTeam} ${spreadLine > 0 ? '+' : ''}${spreadLine}${favSpread?.odds ? ` ${favSpread.odds}` : ''}`
-    : '盤口待確認';
-
-  const favTotal = chooseLowerOdd(totalOver, totalUnder);
-  const totalLine = totalOver?.line ?? totalUnder?.line;
-  const totalSide = favTotal?.side === '小' ? '小' : '大';
-  const total = totalLine !== null && totalLine !== undefined
-    ? `${totalSide} ${Math.abs(totalLine)}${favTotal?.odds ? ` ${favTotal.odds}` : ''}`
-    : (sport === 'football' ? '大小 2.5' : sport === 'basketball' ? '大小待確認' : '大小待確認');
-
-  const c0 = favMoney?.odds ? Math.max(52, Math.min(76, Math.round(100 / favMoney.odds))) : 60;
-  const c1 = favSpread?.odds ? Math.max(52, Math.min(72, Math.round(100 / favSpread.odds))) : 58;
-  const c2 = favTotal?.odds ? Math.max(52, Math.min(70, Math.round(100 / favTotal.odds))) : 56;
-
-  return { money, spread, total, confidence: [c0, c1, c2] };
-}
-
-function parseDateFromPage(text = '') {
-  const m = text.match(/(\d{1,2})\/(\d{1,2})/);
-  if (!m) return null;
-  const y = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric' }).format(new Date());
-  return `${y}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
-}
-
-function convertGroupToGame(group, target, sourceUrl, selectedDate) {
-  const rows = group.rows;
-  if (!rows.length) return null;
-  const time = extractTime(rows.map(r => r.cells.map(c => c.text).join(' ')).join(' '));
-  if (!time) return null;
-
-  const r0 = rows[0].cells;
-  const r1 = rows[1]?.cells || [];
-  const r2 = rows[2]?.cells || [];
-  if (r0.length < 2 || r1.length < 1) return null;
-
-  const awayInfo = parseTeamCell(r0[1]?.text || '', target.sport);
-  const homeInfo = parseTeamCell(r1[0]?.text || '', target.sport);
-  const awayTeam = awayInfo.team;
-  const homeTeam = homeInfo.team;
-  if (isBadTeamName(awayTeam) || isBadTeamName(homeTeam) || awayTeam === homeTeam) return null;
-
-  // 運彩盤在表格右側，通常是每列最後三格：讓分 / 不讓分 / 大小。
-  const last3Top = r0.slice(-3).map(c => c.text);
-  const last3Bottom = r1.slice(-3).map(c => c.text);
-  const last3Third = r2.slice(-3).map(c => c.text);
-
-  let spreadAway = parseOddsLine(last3Top[0] || '');
-  let moneyAway = parseOddsLine(last3Top[1] || '');
-  let totalOver = parseOddsLine(last3Top[2] || '');
-  let spreadHome = parseOddsLine(last3Bottom[0] || '');
-  let moneyHome = parseOddsLine(last3Bottom[1] || '');
-  let totalUnder = parseOddsLine(last3Bottom[2] || '');
-  let moneyDraw = parseOddsLine(last3Third[1] || last3Third[0] || '');
-
-  // 足球只有不讓分與大小，沒有讓分欄時，讓分盤以獨贏方向保守呈現。
-  if (target.sport === 'football' && (!spreadAway.raw || !spreadHome.raw)) {
-    spreadAway = { side: '客', line: 0, odds: moneyAway.odds, raw: moneyAway.raw };
-    spreadHome = { side: '主', line: 0, odds: moneyHome.odds, raw: moneyHome.raw };
+  let spread = '盤口待確認';
+  const spreadPick = chooseLowerOdd(spreadAway, spreadHome);
+  if (sport === 'football') {
+    // 玩運彩足球表格的「不讓分」就是獨贏；真正讓分盤保留給台灣運彩後續補強。
+    spread = `獨贏 ${money}`;
+  } else if (spreadPick && spreadPick.line != null) {
+    const team = spreadPick.side === '客' ? awayTeam : homeTeam;
+    spread = `${team} ${displayLine(spreadPick.line)}`;
   }
 
-  const markets = buildMarkets({
-    sport: target.sport,
-    awayTeam,
-    homeTeam,
-    spreadAway,
-    spreadHome,
-    moneyAway,
-    moneyHome,
-    moneyDraw,
-    totalOver,
-    totalUnder
-  });
+  const totalPick = chooseLowerOdd(totalOver, totalUnder);
+  const totalLine = totalOver?.line ?? totalUnder?.line;
+  const total = totalLine != null ? `${totalPick?.side === '小' ? '小' : '大'} ${Math.abs(totalLine)}` : '大小待確認';
 
+  const c0 = moneyPick?.odds ? Math.max(52, Math.min(76, Math.round(100 / moneyPick.odds))) : 60;
+  const c1 = spreadPick?.odds ? Math.max(52, Math.min(72, Math.round(100 / spreadPick.odds))) : 58;
+  const c2 = totalPick?.odds ? Math.max(52, Math.min(70, Math.round(100 / totalPick.odds))) : 56;
+  return { money, spread, total, confidence: [c0, c1, c2] };
+}
+function parseTeamPairFromInfo(text, sport) {
+  const ls = lines(text).filter(x => !/^\d+$/.test(x) && !/^V\.S\.?$/i.test(x) && !/^VS$/i.test(x));
+  if (sport === 'baseball') {
+    return { team: cleanTeamName(ls[0] || ''), detail: ls.slice(1).join(' ') };
+  }
+  const teams = ls.filter(x => !/^\d+$/.test(x) && !/^[\d]+\s*[:：]?\s*$/.test(x));
+  return { teams: teams.map(cleanTeamName).filter(x => !isBadTeamName(x)) };
+}
+function getTeamsFromGroup(group, sport) {
+  const rows = group.rows;
+  const first = rows[0];
+  if (sport === 'baseball') {
+    const awayCell = pickByClass(first, 'td-teaminfo');
+    const homeRow = rows.find((r,idx)=>idx>0 && pickByClass(r, 'td-teaminfo'));
+    const homeCell = homeRow ? pickByClass(homeRow, 'td-teaminfo') : null;
+    const away = parseTeamPairFromInfo(awayCell?.text || '', sport);
+    const home = parseTeamPairFromInfo(homeCell?.text || '', sport);
+    return { awayTeam: away.team, homeTeam: home.team, awayDetail: away.detail, homeDetail: home.detail };
+  }
+  // 籃球/足球若 td-teaminfo rowspan 內含比分表，文字順序通常是 客隊、主隊。
+  const mainTeamCell = rows.flatMap(r=>r.cells).find(c => c.cls.includes('td-teaminfo'));
+  let teams = parseTeamPairFromInfo(mainTeamCell?.text || '', sport).teams || [];
+  if (teams.length < 2) {
+    teams = rows.flatMap(r=>r.cells).filter(c => /(team|secondteam|winnerteam|loserteam|td-teaminfo)/.test(c.cls)).flatMap(c => lines(c.text)).map(cleanTeamName).filter(x => !isBadTeamName(x));
+  }
+  return { awayTeam: teams[0], homeTeam: teams[1], awayDetail: '', homeDetail: '' };
+}
+function findMarketCell(group, cls, side) {
+  for (const r of group.rows) for (const c of r.cells) {
+    if (!c.cls.includes(cls)) continue;
+    const t = oneLine(c.text);
+    if (!t) continue;
+    if (side === '大' || side === '小') { if (t.includes(side)) return c; }
+    else if (side === '和') { if (t.includes('和')) return c; }
+    else if (new RegExp(`(^|\\s|\\|)${side}`).test(t)) return c;
+  }
+  return null;
+}
+function convertGroupToGame(group, target, sourceUrl) {
+  const allText = group.rows.map(r => r.text).join(' ');
+  const time = extractTime(allText);
+  if (!time) return null;
+  const { awayTeam, homeTeam, awayDetail, homeDetail } = getTeamsFromGroup(group, target.sport);
+  if (isBadTeamName(awayTeam) || isBadTeamName(homeTeam) || awayTeam === homeTeam) return null;
+
+  let spreadAway = parseMarket(findMarketCell(group, 'td-bank-bet01', '客')?.text || '');
+  let spreadHome = parseMarket(findMarketCell(group, 'td-bank-bet01', '主')?.text || '');
+  let moneyAway = parseMarket(findMarketCell(group, 'td-bank-bet03', '客')?.text || '');
+  let moneyHome = parseMarket(findMarketCell(group, 'td-bank-bet03', '主')?.text || '');
+  let moneyDraw = parseMarket(findMarketCell(group, target.sport === 'football' ? 'td-bank-bet01' : 'td-bank-bet03', '和')?.text || '');
+  const totalOver = parseMarket(findMarketCell(group, 'td-bank-bet02', '大')?.text || '');
+  const totalUnder = parseMarket(findMarketCell(group, 'td-bank-bet02', '小')?.text || '');
+
+  // 非足球才用 td-bank-bet01 當讓分；足球 bet01 是和局，不可當讓分。
+  if (target.sport === 'football') { spreadAway = null; spreadHome = null; }
+
+  const markets = buildMarkets({ sport: target.sport, awayTeam, homeTeam, spreadAway, spreadHome, moneyAway, moneyHome, moneyDraw, totalOver, totalUnder });
+  const gameInfoCell = group.rows[0].cells.find(c => c.cls.includes('td-gameinfo'));
   const competition = target.sport === 'football'
-    ? onlyText((r0[0]?.text || '').replace(/\b\d{2,5}\b/g, '').replace(/AM\s*\d{1,2}:\d{2}/i, '')).replace('對戰資訊', '').trim()
+    ? lines(gameInfoCell?.text || '').filter(x => !/^\d{3,5}$/.test(x) && !/^(AM|PM)/i.test(x) && !/\d{1,2}:\d{2}/.test(x))[0] || '足球'
     : target.league;
 
-  const starters = target.sport === 'baseball'
-    ? [
-        { team: homeTeam, name: homeInfo.detail || '先發待公布', role: '主隊先發', stats: [['來源', '玩運彩'], ['狀態', homeInfo.detail ? '已公布' : '待公布']] },
-        { team: awayTeam, name: awayInfo.detail || '先發待公布', role: '客隊先發', stats: [['來源', '玩運彩'], ['狀態', awayInfo.detail ? '已公布' : '待公布']] }
-      ]
-    : [];
-
-  const corePlayers = target.sport !== 'baseball'
-    ? [
-        { team: homeTeam, name: '核心隊員待同步', role: '主隊', award: '資料來源：玩運彩賽事表；詳細球員數據由 Yahoo / SofaScore 後續補強。' },
-        { team: awayTeam, name: '核心隊員待同步', role: '客隊', award: '若賽前尚未公布名單，前台會先顯示隊伍盤口與近期數據。' }
-      ]
-    : [];
+  const starters = target.sport === 'baseball' ? [
+    { team: homeTeam, name: homeDetail || '先發待公布', role: '主隊先發', stats: [['數據來源', 'Yahoo奇摩運動待同步'], ['ERA', '待更新'], ['WHIP', '待更新'], ['近況', '待更新']] },
+    { team: awayTeam, name: awayDetail || '先發待公布', role: '客隊先發', stats: [['數據來源', 'Yahoo奇摩運動待同步'], ['ERA', '待更新'], ['WHIP', '待更新'], ['近況', '待更新']] }
+  ] : [];
+  const corePlayers = target.sport !== 'baseball' ? [
+    { team: homeTeam, name: '核心隊員待同步', role: '主隊', award: '依 Yahoo / SofaScore 後續補強近期狀態、傷兵與主客場數據。' },
+    { team: awayTeam, name: '核心隊員待同步', role: '客隊', award: '盤口已先依玩運彩運彩盤整理，不含賠率。' }
+  ] : [];
 
   return {
-    game_date: dateTW(0),
-    sport: target.sport,
-    league: target.league,
-    game_time: time,
-    // 前台目前用 away vs home 顯示；依需求改成主隊放第一個，所以這裡把主隊放在 away 欄。
-    away: homeTeam,
-    home: awayTeam,
-    money: markets.money,
-    spread: markets.spread,
-    total: markets.total,
-    confidence: markets.confidence,
-    source_url: sourceUrl,
-    source_name: '玩運彩',
-    active: true,
-    updated_at: nowISO(),
+    game_date: dateTW(0), sport: target.sport, league: target.league, game_time: time,
+    // 前台用 away vs home 顯示；依需求主隊放第一個，故欄位反向存放。
+    away: homeTeam, home: awayTeam,
+    money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
+    source_url: sourceUrl, source_name: '玩運彩', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v56-table-parser',
-      play_date: selectedDate || null,
-      true_home: homeTeam,
-      true_away: awayTeam,
-      display_order: 'home_first',
-      competition: competition || target.league,
-      sport_label: target.label,
-      starters,
-      core_players: corePlayers,
-      odds: {
-        spread_away: spreadAway,
-        spread_home: spreadHome,
-        money_away: moneyAway,
-        money_home: moneyHome,
-        money_draw: moneyDraw,
-        total_over: totalOver,
-        total_under: totalUnder
-      },
-      source_note: '盤口只取玩運彩預測賽事右側「運彩盤」欄位；棒球顯示先發投手，籃球/足球保留核心隊員補強欄位。',
-      data_sources: target.sport === 'football'
-        ? ['玩運彩預測賽事', 'SofaScore 隊伍資料']
-        : ['玩運彩預測賽事', 'Yahoo 奇摩運動隊伍資料']
+      parser_version: 'v57-playsport-structured-parser', true_away: awayTeam, true_home: homeTeam,
+      display_order: 'home_first', competition, sport_label: target.label,
+      starters, core_players: corePlayers,
+      odds_hidden: true,
+      odds: { spread_away: spreadAway, spread_home: spreadHome, money_away: moneyAway, money_home: moneyHome, money_draw: moneyDraw, total_over: totalOver, total_under: totalUnder },
+      source_note: 'v57 依玩運彩表格 class 解析：非足球只取右側運彩盤；賠率僅做內部信心值，不顯示在前台；足球不讓分視為獨贏。',
+      data_sources: target.sport === 'football' ? ['玩運彩預測賽事', '台灣運彩盤口', 'SofaScore'] : ['玩運彩預測賽事', 'Yahoo奇摩運動']
     }
   };
 }
-
-async function scrapeCurrentTable(page, target) {
-  return await page.evaluate((target) => {
-    const norm = (s = '') => String(s).replace(/\u00a0/g, ' ').trim();
-    const cellObj = (td) => ({
-      text: norm(td.innerText || td.textContent || ''),
-      rowspan: Number(td.getAttribute('rowspan') || '1'),
-      colspan: Number(td.getAttribute('colspan') || '1')
+async function clickByText(page, label) {
+  try { await page.getByText(label, { exact: true }).first().click({ timeout: 5000 }); await page.waitForTimeout(1500); return true; } catch {}
+  try { await page.locator(`text=${label}`).first().click({ timeout: 5000 }); await page.waitForTimeout(1500); return true; } catch {}
+  return false;
+}
+async function clickTodayDate(page) {
+  const today = mdTW(0);
+  const clicked = await page.evaluate((today) => {
+    const [mm, dd] = today.split('/');
+    const els = [...document.querySelectorAll('a,button,td,div,span')];
+    const hit = els.find(el => {
+      const txt = (el.innerText || el.textContent || '').replace(/\s+/g, '');
+      return txt.includes(`${mm}/${dd}`) || txt.includes(`${Number(mm)}/${Number(dd)}`) || txt.includes(`${mm}${dd}`);
     });
-    const allTables = [...document.querySelectorAll('table')];
-    let best = null;
-    for (const table of allTables) {
-      const t = table.innerText || table.textContent || '';
-      let score = 0;
-      if (t.includes('賽事資訊')) score += 3;
-      if (t.includes('球隊資訊')) score += 3;
-      if (t.includes('運彩盤')) score += 4;
-      if (t.includes('國際盤')) score += 2;
-      if ((t.match(/AM\s*\d{1,2}:\d{2}/g) || []).length) score += 2;
-      if (!best || score > best.score) best = { table, score };
-    }
-    const table = best?.score > 0 ? best.table : allTables.sort((a,b)=>(b.innerText||'').length-(a.innerText||'').length)[0];
-    if (!table) return { selectedDate: null, groups: [] };
-
-    const bodyText = document.body?.innerText || '';
-    const dateButtons = [...document.querySelectorAll('a,button,td,div,span')]
-      .map(el => ({ text: norm(el.innerText || el.textContent || ''), bg: getComputedStyle(el).backgroundColor, color: getComputedStyle(el).color }))
-      .filter(x => /\d{1,2}\/\d{1,2}/.test(x.text));
-    const selected = dateButtons.find(x => /255|yellow|rgb\(255, 255, 0\)|rgb\(255, 235/.test(`${x.bg} ${x.color}`)) || dateButtons.at(-1);
-
-    const trs = [...table.querySelectorAll('tr')].map(tr => ({
-      text: norm(tr.innerText || tr.textContent || ''),
-      cells: [...tr.children].filter(el => /^(TD|TH)$/.test(el.tagName)).map(cellObj)
-    })).filter(r => r.cells.length && r.text);
-
+    if (hit) { hit.click(); return true; }
+    return false;
+  }, today);
+  if (clicked) await page.waitForTimeout(2500);
+  return clicked;
+}
+async function extractGroups(page) {
+  return await page.evaluate(() => {
+    const norm = s => String(s || '').replace(/\u00a0/g, ' ').trim();
+    const cellObj = td => ({ text: norm(td.innerText || td.textContent || ''), cls: [...td.classList].join(' '), rowspan: Number(td.getAttribute('rowspan') || '1'), colspan: Number(td.getAttribute('colspan') || '1') });
+    const tables = [...document.querySelectorAll('table.predictgame-table')];
+    const table = tables[0] || [...document.querySelectorAll('table')].sort((a,b)=>(b.innerText||'').length-(a.innerText||'').length)[0];
+    if (!table) return [];
+    const trs = [...table.querySelectorAll('tr')].map(tr => ({ text: norm(tr.innerText || tr.textContent || ''), cells: [...tr.children].filter(el => /^(TD|TH)$/.test(el.tagName)).map(cellObj) })).filter(r => r.cells.length && r.text);
     const groups = [];
     let cur = null;
     for (const row of trs) {
       const rowText = row.text.replace(/\s+/g, ' ');
-      const hasTime = /\b(?:AM|PM)\s*\d{1,2}:\d{2}\b|\b\d{1,2}:\d{2}\b/i.test(rowText);
-      const isHeader = /賽事資訊|球隊資訊|運彩盤|國際盤|日期/.test(rowText);
-      if (isHeader) continue;
-      if (hasTime) {
-        if (cur) groups.push(cur);
-        cur = { rows: [row] };
-      } else if (cur) {
-        cur.rows.push(row);
-      }
+      if (/賽事資訊|球隊資訊|運彩盤|國際盤|日期/.test(rowText)) continue;
+      const starts = row.cells.some(c => c.cls.includes('td-gameinfo')) && /(?:AM|PM)\s*\d{1,2}:\d{2}|\d{1,2}:\d{2}/i.test(rowText);
+      const spacer = row.cells.length === 1 && !row.text.trim();
+      if (starts) { if (cur) groups.push(cur); cur = { rows: [row] }; }
+      else if (cur && !spacer) cur.rows.push(row);
+      else if (cur && spacer) { groups.push(cur); cur = null; }
     }
     if (cur) groups.push(cur);
-    return { selectedDate: selected?.text || bodyText.match(/\d{1,2}\/\d{1,2}/)?.[0] || null, groups };
-  }, target);
-}
-
-async function clickTargetTab(page, label) {
-  const exact = page.getByText(label, { exact: true }).first();
-  try {
-    await exact.click({ timeout: 5000 });
-    await page.waitForTimeout(2500);
-    return true;
-  } catch {}
-  try {
-    const partial = page.locator(`text=${label}`).first();
-    await partial.click({ timeout: 5000 });
-    await page.waitForTimeout(2500);
-    return true;
-  } catch {}
-  return false;
-}
-
-async function scrapePlaySportWithBrowser() {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
-  const context = await browser.newContext({
-    locale: 'zh-TW', timezoneId: 'Asia/Taipei',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+    return groups;
   });
-
+}
+async function scrapePlaySportWithBrowser() {
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox','--disable-dev-shm-usage'] });
+  const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36' });
   const games = [];
   try {
     for (const target of TARGETS) {
@@ -324,119 +239,56 @@ async function scrapePlaySportWithBrowser() {
       try {
         console.log(`Opening PlaySport target: ${target.label}`);
         await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
-        await page.waitForTimeout(3000);
-        await clickTargetTab(page, target.label);
+        await page.waitForTimeout(2500);
+        await clickByText(page, target.label);
+        await clickTodayDate(page);
         try { await page.waitForLoadState('networkidle', { timeout: 10000 }); } catch {}
-        await page.waitForTimeout(3000);
-
-        const extracted = await scrapeCurrentTable(page, target);
-        const selectedDate = parseDateFromPage(extracted.selectedDate || '') || null;
+        await page.waitForTimeout(2000);
+        const groups = await extractGroups(page);
         let parsed = 0;
-        for (const group of extracted.groups) {
-          const game = convertGroupToGame(group, target, page.url(), selectedDate);
-          if (game) { games.push(game); parsed++; }
-        }
-        console.log(`${target.label}: table groups=${extracted.groups.length}, parsed=${parsed}, selectedDate=${selectedDate || 'n/a'}`);
-      } catch (e) {
-        console.warn(`${target.label} scrape failed: ${e.message}`);
-      } finally {
-        await page.close().catch(() => {});
-      }
+        for (const group of groups) { const g = convertGroupToGame(group, target, page.url()); if (g) { games.push(g); parsed++; } }
+        console.log(`${target.label}: groups=${groups.length}, parsed=${parsed}, date=${dateTW(0)}`);
+      } catch(e) { console.warn(`${target.label} scrape failed: ${e.message}`); }
+      finally { await page.close().catch(()=>{}); }
     }
-  } finally {
-    await context.close().catch(() => {});
-    await browser.close().catch(() => {});
-  }
-
-  const unique = new Map();
-  for (const g of games) {
-    const key = `${g.game_date}|${g.league}|${g.away}|${g.home}|${g.game_time}`;
-    if (!unique.has(key)) unique.set(key, g);
-  }
-  return [...unique.values()].sort((a,b)=>`${a.league}${a.game_time}`.localeCompare(`${b.league}${b.game_time}`));
+  } finally { await context.close().catch(()=>{}); await browser.close().catch(()=>{}); }
+  const map = new Map();
+  for (const g of games) { const key = `${g.game_date}|${g.league}|${g.away}|${g.home}|${g.game_time}`; if (!map.has(key)) map.set(key, g); }
+  return [...map.values()].sort((a,b)=>`${a.league}${a.game_time}`.localeCompare(`${b.league}${b.game_time}`));
 }
-
 async function supabaseRequest(path, options = {}) {
-  const base = SUPABASE_URL.replace(/\/$/, '');
-  const url = `${base}/rest/v1/${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    }
-  });
+  const url = `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/${path}`;
+  const res = await fetch(url, { ...options, headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
   const txt = await res.text();
   if (!res.ok) throw new Error(txt || `${res.status} ${res.statusText}`);
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
-
 async function writeSyncStatus(status, message, count = 0) {
-  try {
-    await supabaseRequest('daily_sync_status?on_conflict=sync_date,source_name', {
-      method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify([{
-        sync_date: dateTW(0), source_name: 'playsport-v56-table-parser', status, message,
-        games_count: count, updated_at: nowISO()
-      }])
-    });
-  } catch (e) {
-    console.warn('daily_sync_status not written:', e.message);
-  }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'playsport-v57', created_at: nowISO() }]) }); }
+  catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
-
-async function archiveTodayToYesterday(reason = 'PlaySport parsed 0 valid games') {
-  const today = dateTW(0);
-  const yesterday = dateTW(-1);
+async function archiveTodayToYesterday(reason = 'v57 parsed 0 valid games') {
+  const today = dateTW(0), yesterday = dateTW(-1);
   let rows = [];
-  try { rows = await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true&select=*`) || []; } catch (e) { console.warn(e.message); }
-  if (!rows.length) {
-    console.log('No active today rows to archive.');
-    await writeSyncStatus('empty', `${reason}; no active today rows`, 0);
-    return;
-  }
+  try { rows = await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true&select=*`) || []; } catch(e) { console.warn(e.message); }
+  if (!rows.length) { await writeSyncStatus('empty', `${reason}; no active today rows`, 0); return; }
   const archived = rows.map(r => ({ ...r, id: undefined, game_date: yesterday, active: true, updated_at: nowISO(), analysis_json: { ...(r.analysis_json || {}), archived_from_today: today, archive_reason: reason } }));
-  await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', {
-    method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(archived)
-  });
-  await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true`, {
-    method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() })
-  });
-  console.log(`Moved ${archived.length} active today rows to yesterday (${yesterday}).`);
+  await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(archived) });
+  await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() }) });
   await writeSyncStatus('empty_archived', reason, archived.length);
 }
-
 async function upsertDailyGames(rows) {
   const today = dateTW(0);
-  if (!rows.length) {
-    await archiveTodayToYesterday('v56 table parser parsed 0 valid games');
-    return;
-  }
-
-  // 清掉今天舊資料，避免上一版錯誤格式殘留在前台。
-  await supabaseRequest(`daily_games?game_date=eq.${today}`, {
-    method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() })
-  });
-
-  await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', {
-    method: 'POST',
-    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify(rows)
-  });
-  await writeSyncStatus('success', `v56 synced ${rows.length} valid games`, rows.length);
+  if (!rows.length) { await archiveTodayToYesterday('v57 parsed 0 valid games'); return; }
+  await supabaseRequest(`daily_games?game_date=eq.${today}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() }) });
+  await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
+  await writeSyncStatus('success', `v57 synced ${rows.length} valid games`, rows.length);
 }
-
 async function main() {
   const games = await scrapePlaySportWithBrowser();
   console.log(`Parsed valid games: ${games.length}`);
-  if (games.length) {
-    console.log(games.slice(0, 30).map(g => `${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
-  }
+  console.log(games.slice(0, 40).map(g => `${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   await upsertDailyGames(games);
   console.log(games.length ? `Synced ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed; archived today if needed.');
 }
-
 main().catch(err => { console.error(err); process.exit(1); });
