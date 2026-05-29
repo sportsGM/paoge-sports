@@ -736,21 +736,21 @@ function buildGameData(g){
   const base=data[g.sport]||data.baseball;
   const aj=g.analysis_json||{};
   const copy=JSON.parse(JSON.stringify(base));
-  const cleanStats=(arr,fallback)=>Array.isArray(arr)&&arr.length?arr.filter(s=>!['來源','數據來源','資料來源','狀態','補強'].includes(String(s[0]||''))).map(s=>[s[0],String(s[1]||'待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'').trim()||'待更新']):fallback;
+  const cleanStats=(arr,fallback)=>Array.isArray(arr)&&arr.length?arr.filter(s=>!['來源','數據來源','資料來源','狀態','補強'].includes(String(s[0]||''))).map(s=>[s[0],String(s[1]||'無').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'').trim()||'無']):fallback;
   if(Array.isArray(aj.starters) && aj.starters.length){
     copy.topTitle='雙方先發';
-    copy.top=aj.starters.map(x=>({team:x.team||'',name:x.name||'先發待公布',role:x.role||'先發',stats:cleanStats(x.stats,[["ERA","待更新"],["WHIP","待更新"],["勝投","待更新"],["敗投","待更新"],["近況","待更新"]])}));
+    copy.top=aj.starters.map(x=>({team:x.team||'',name:x.name||'先發待公布',role:x.role||'先發',stats:cleanStats(x.stats,[["ERA","無"],["WHIP","無"],["勝投","無"],["敗投","無"],["近況","無"]])}));
   }
   if(g.sport==='football'){
     copy.topTitle='雙方近況分析';
     copy.footballSummary = aj.football_summary || {
-      home: `${g.away} 主場近況與陣容狀態待更新。`,
-      away: `${g.home} 客場近況與攻防效率待更新。`,
+      home: `${g.away} 主場近況與陣容狀態無。`,
+      away: `${g.home} 客場近況與攻防效率無。`,
       conclusion: '目前以近期狀態、主客場表現與盤口方向綜合判斷，詳細資料會由資料中心每小時補齊。'
     };
   } else if(Array.isArray(aj.core_players) && aj.core_players.length){
     copy.topTitle='核心球員數據';
-    const players=aj.core_players.map(x=>({team:x.team||'',name:String(x.name||'核心球員待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩/g,''),role:x.role||'隊伍資料',award:String(x.award||'近期狀態待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,''),stats:cleanStats(x.stats,[["近況","待更新"],["主客場","待更新"],["傷停","待更新"]])}));
+    const players=aj.core_players.map(x=>({team:x.team||'',name:String(x.name||'核心球員無').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩/g,''),role:x.role||'隊伍資料',award:String(x.award||'近期狀態無').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,''),stats:cleanStats(x.stats,[["近況","無"],["主客場","無"],["傷停","無"]])}));
     copy.top=players;
   }
   if(Array.isArray(aj.metrics)&&aj.metrics.length) copy.metrics=aj.metrics;
@@ -782,8 +782,8 @@ function summaryCards(g){
 function mainMarket(title,val,pct,sub,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-2xl border ${cls} p-4"><div class="text-xs font-black">${title}</div><div class="market-big mt-2">${val}</div><div class="flex justify-between mt-4 text-sm font-black"><span>${sub}</span><span>${pct}%</span></div><div class="conf mt-2"><i style="width:${pct}%"></i></div></div>`; }
 function footballAnalysis(d,g){
   const fs=d.footballSummary||{};
-  const homeTxt=String(fs.home||`${g.away} 主隊近況待更新。`).replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
-  const awayTxt=String(fs.away||`${g.home} 客隊近況待更新。`).replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
+  const homeTxt=String(fs.home||`${g.away} 主隊近況無。`).replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
+  const awayTxt=String(fs.away||`${g.home} 客隊近況無。`).replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
   const con=String(fs.conclusion||'系統會依近期狀態、主客場表現與盤口方向更新分析。').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
   return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-amber-400/20 p-4"><div class="text-amber-300 font-black mb-2">主隊｜${g.away}</div><p class="text-slate-300 font-bold leading-7">${homeTxt}</p></div><div class="rounded-2xl bg-slate-900/75 border border-blue-400/20 p-4"><div class="text-blue-300 font-black mb-2">客隊｜${g.home}</div><p class="text-slate-300 font-bold leading-7">${awayTxt}</p></div><div class="md:col-span-2 rounded-2xl bg-slate-950 border border-slate-800 p-4"><div class="text-emerald-300 font-black mb-2">AI綜合判斷</div><p class="text-slate-300 font-bold leading-7">${con}</p></div></div>`;
 }
@@ -2886,6 +2886,7 @@ function v52TodayTW(offsetDays=0){
   }
 }
 function v53DailyGamesDate(){
+  if(typeof v68IsUSShiftLeague==='function' && v68IsUSShiftLeague()) return v52TodayTW(0);
   return (typeof v33DayMode!=='undefined' && v33DayMode==='tomorrow') ? v52TodayTW(1) : v52TodayTW(0);
 }
 
@@ -2899,9 +2900,9 @@ function v52NormalizeDailyGame(r){
     time:r.game_time || '',
     away:r.away || '客隊',
     home:r.home || '主隊',
-    money:r.money || ((r.home||'主隊')+'勝'),
-    spread:r.spread || ((r.home||'主隊')+' -1.5'),
-    total:r.total || (r.sport==='football'?'大 2.5':r.sport==='basketball'?'小 223.5':'大 8.5'),
+    money:r.money || '尚未開盤',
+    spread:r.spread || '尚未開盤',
+    total:r.total || '尚未開盤',
     sport:r.sport || 'baseball',
     conf:Array.isArray(r.confidence) ? r.confidence : [60,60,60],
     source_url:r.source_url || '',
