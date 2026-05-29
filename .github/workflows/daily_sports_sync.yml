@@ -1,10 +1,21 @@
-name: Daily 2AM sports sync v98 insert fix
+name: Sports sync v105 incremental + daily full
 
 on:
   schedule:
-    # 每天台灣時間 02:00 = UTC 18:00
-    - cron: "0 18 * * *"
+    # 小同步：每小時 10 分檢查一次；避開 UTC 16:10，因為那是台灣 00:10 大同步
+    - cron: "10 0-15,17-23 * * *"
+    # 大同步：每天台灣時間 00:10 = UTC 16:10
+    - cron: "10 16 * * *"
   workflow_dispatch:
+    inputs:
+      sync_mode:
+        description: "選擇同步模式"
+        required: true
+        default: "incremental"
+        type: choice
+        options:
+          - incremental
+          - full
 
 jobs:
   sync:
@@ -26,6 +37,7 @@ jobs:
       - name: Run sports sync
         run: npm run sync:sports
         env:
+          SYNC_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_mode || (github.event.schedule == '10 16 * * *' && 'full' || 'incremental') }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SEARCH_PROVIDER: ${{ secrets.SEARCH_PROVIDER }}
