@@ -80,13 +80,18 @@ function displayLine(n) { return n == null ? '' : `${n > 0 ? '+' : ''}${n}`; }
 function buildMarkets({ sport, awayTeam, homeTeam, spreadAway, spreadHome, moneyAway, moneyHome, moneyDraw, totalOver, totalUnder }) {
   const moneyPick = sport === 'football' ? chooseLowerOdd(moneyAway, moneyHome, moneyDraw) : chooseLowerOdd(moneyAway, moneyHome);
   const moneyTeam = moneyPick?.side === '客' ? awayTeam : moneyPick?.side === '主' ? homeTeam : '和局';
-  const money = moneyPick?.side === '和' ? '和局' : `${moneyTeam || homeTeam || awayTeam}勝`;
+  const money = sport === 'football'
+    ? (moneyPick?.side === '客' ? '客隊勝' : moneyPick?.side === '主' ? '主隊勝' : moneyPick?.side === '和' ? '和局' : '獨贏待確認')
+    : (moneyPick?.side === '和' ? '和局' : `${moneyTeam || homeTeam || awayTeam}勝`);
 
   let spread = '盤口待確認';
   const spreadPick = chooseLowerOdd(spreadAway, spreadHome);
   if (sport === 'football') {
-    // 玩運彩足球表格的「不讓分」就是獨贏；真正讓分盤保留給台灣運彩後續補強。
-    spread = `獨贏 ${money}`;
+    // 足球：玩運彩「不讓分」視為獨贏，前台用短標籤避免長隊名擠在盤口卡片。
+    if (moneyPick?.side === '客') spread = '客隊勝';
+    else if (moneyPick?.side === '主') spread = '主隊勝';
+    else if (moneyPick?.side === '和') spread = '和局';
+    else spread = '待確認';
   } else if (spreadPick && spreadPick.line != null) {
     const team = spreadPick.side === '客' ? awayTeam : homeTeam;
     spread = `${team} ${displayLine(spreadPick.line)}`;
@@ -206,7 +211,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     { team: homeTeam, name: homeDetail || '先發待公布', role: '主隊先發', stats: [...defaultPitcherStats()] },
     { team: awayTeam, name: awayDetail || '先發待公布', role: '客隊先發', stats: [...defaultPitcherStats()] }
   ] : [];
-  const corePlayers = target.sport !== 'baseball' ? [
+  const corePlayers = target.sport === 'basketball' ? [
     { team: homeTeam, name: '核心球員待更新', role: '主隊', award: '近期狀態、傷兵與主客場數據待更新', stats: defaultCoreStats(target.sport) },
     { team: awayTeam, name: '核心球員待更新', role: '客隊', award: '近期狀態、傷兵與主客場數據待更新', stats: defaultCoreStats(target.sport) }
   ] : [];
@@ -218,13 +223,18 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v61-data-center', true_away: awayTeam, true_home: homeTeam,
+      parser_version: 'v62-football-nba-fixed', true_away: awayTeam, true_home: homeTeam,
       display_order: 'home_first', competition, sport_label: target.label,
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
       injuries: defaultInjuries(awayTeam, homeTeam, target.sport),
       h2h: defaultH2H(awayTeam, homeTeam),
       recent: defaultRecent(awayTeam, homeTeam),
+      football_summary: target.sport === 'football' ? {
+        home: `${homeTeam} 近期狀態待更新，系統會依主場表現、近五場攻防與盤口變化補齊。`,
+        away: `${awayTeam} 近期狀態待更新，系統會依客場表現、近五場攻防與盤口變化補齊。`,
+        conclusion: `本場先以獨贏方向 ${markets.money}、大小分 ${markets.total} 作為初步參考；詳細近期對戰與雙方狀態由資料中心補齊。`
+      } : null,
       detail_status: 'pending',
       odds_hidden: true,
       odds: { spread_away: spreadAway, spread_home: spreadHome, money_away: moneyAway, money_home: moneyHome, money_draw: moneyDraw, total_over: totalOver, total_under: totalUnder },
@@ -294,7 +304,7 @@ async function scrapePlaySportWithBrowser() {
         const groups = await extractGroups(page);
         let parsed = 0;
         for (const group of groups) { const g = convertGroupToGame(group, target, page.url()); if (g) { games.push(g); parsed++; } }
-        console.log(`${target.label}: groups=${groups.length}, parsed=${parsed}, date=${dateTW(0)}`);
+        console.log(`${target.label}: groups=${groups.length}, parsed=${parsed}, date=${dateTW(0)}${target.league==='NBA'?' (NBA獨立解析器)':target.sport==='football'?' (足球短盤口/近況版)':''}`);
       } catch(e) { console.warn(`${target.label} scrape failed: ${e.message}`); }
       finally { await page.close().catch(()=>{}); }
     }
@@ -311,10 +321,10 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v61-data-center', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v62-data-center', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
-async function archiveTodayToYesterday(reason = 'v61 parsed 0 valid games') {
+async function archiveTodayToYesterday(reason = 'v62 parsed 0 valid games') {
   const today = dateTW(0), yesterday = dateTW(-1);
   let rows = [];
   try { rows = await supabaseRequest(`daily_games?game_date=eq.${today}&active=eq.true&select=*`) || []; } catch(e) { console.warn(e.message); }
@@ -326,10 +336,10 @@ async function archiveTodayToYesterday(reason = 'v61 parsed 0 valid games') {
 }
 async function upsertDailyGames(rows) {
   const today = dateTW(0);
-  if (!rows.length) { await archiveTodayToYesterday('v61 parsed 0 valid games'); return; }
+  if (!rows.length) { await archiveTodayToYesterday('v62 parsed 0 valid games'); return; }
   await supabaseRequest(`daily_games?game_date=eq.${today}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false, updated_at: nowISO() }) });
   await supabaseRequest('daily_games?on_conflict=game_date,league,away,home', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
-  await writeSyncStatus('success', `v61 synced ${rows.length} valid games`, rows.length);
+  await writeSyncStatus('success', `v62 synced ${rows.length} valid games`, rows.length);
 }
 async function main() {
   const games = await scrapePlaySportWithBrowser();

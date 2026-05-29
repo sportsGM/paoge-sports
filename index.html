@@ -585,7 +585,7 @@ recent:[
 {team:"馬刺",side:"客隊",items:[["2025/05/23","@ 雷霆","115：122","輸"],["2025/05/21","@ 雷霆","122：113","贏"],["2025/05/19","@ 雷霆","104：118","輸"],["2025/05/17","vs 湖人","121：127","輸"],["2025/05/15","vs 湖人","110：105","贏"]]}]
 },
 football:{
-topTitle:"核心球員",
+topTitle:"雙方近況分析",
 top:[
 {team:"巴列卡諾閃電",name:"Álvaro García",role:"邊鋒",award:"隊內速度型主力，邊路突破與反擊核心",stats:[["場均射門","1.8"],["關鍵傳球","1.3"]]},
 {team:"巴列卡諾閃電",name:"Isi Palazón",role:"進攻中場",award:"隊內定位球與前場串聯核心",stats:[["關鍵傳球","1.7"],["平均評分","7.01"]]},
@@ -711,9 +711,25 @@ function renderGames(){
   $('leagueTitle').textContent=leagueName+'｜今日賽事';
   const list=games[state.league]||[];
   if(!list.length){ $('games').innerHTML='<div class="soft rounded-2xl p-6 text-center text-slate-400 font-black">目前沒有抓到此分類賽事；資料中心會每小時重新整理。</div>'; return; }
-  $('games').innerHTML=list.map((g,i)=>`<article class="soft rounded-2xl p-3"><div class="grid xl:grid-cols-[minmax(0,1fr)_320px_240px] gap-3 items-center"><div class="min-w-0"><div class="flex items-center gap-2 text-xs text-slate-500 font-black"><span>${g.time}</span><span>•</span><span>${leagueName}</span></div><h3 class="text-lg font-black truncate mt-1">${g.away} vs ${g.home}</h3></div><div class="grid grid-cols-3 gap-2">${marketMini('獨贏',g.money,'emerald')}${marketMini('讓分',g.spread,'blue')}${marketMini('大小',g.total,'pink')}</div><div class="action-row"><button onclick="openGame(${i},'data')" class="rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black px-3 py-3">查看數據</button><button onclick="openGame(${i},'board')" class="rounded-xl border border-slate-700 bg-slate-950 text-slate-100 font-black px-3 py-3">留言板</button></div></div></article>`).join('');
+  $('games').innerHTML=list.map((g,i)=>{
+    const title = g.sport==='football' ? `<span class="text-amber-300">主隊</span> ${g.away} <span class="text-slate-500">vs</span> <span class="text-blue-300">客隊</span> ${g.home}` : `${g.away} vs ${g.home}`;
+    const money = g.sport==='football' ? shortFootballMarket(g.money,'money') : g.money;
+    const spread = g.sport==='football' ? shortFootballMarket(g.spread,'spread') : g.spread;
+    const total = shortFootballMarket(g.total,'total');
+    return `<article class="soft rounded-2xl p-3"><div class="grid xl:grid-cols-[minmax(0,1fr)_320px_240px] gap-3 items-center"><div class="min-w-0"><div class="flex items-center gap-2 text-xs text-slate-500 font-black"><span>${g.time}</span><span>•</span><span>${leagueName}</span></div><h3 class="text-lg font-black truncate mt-1">${title}</h3></div><div class="grid grid-cols-3 gap-2">${marketMini('獨贏',money,'emerald')}${marketMini('讓分',spread,'blue')}${marketMini('大小',total,'pink')}</div><div class="action-row"><button onclick="openGame(${i},'data')" class="rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black px-3 py-3">查看數據</button><button onclick="openGame(${i},'board')" class="rounded-xl border border-slate-700 bg-slate-950 text-slate-100 font-black px-3 py-3">留言板</button></div></div></article>`;
+  }).join('');
 }
-function marketMini(label,val,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-xl border ${cls} p-2"><div class="text-[11px] font-black">${label}</div><div class="market mt-1">${val}</div></div>`; }
+function shortFootballMarket(val,type){
+  const raw=String(val||'').replace(/★/g,'').trim();
+  if(type==='total') return raw || '大小待確認';
+  if(/和局|平手/.test(raw)) return '和局';
+  if(/客隊|客勝/.test(raw)) return '客隊勝';
+  if(/主隊|主勝/.test(raw)) return '主隊勝';
+  if(/獨贏/.test(raw)) return raw.replace(/獨贏\s*/,'') || '獨贏待確認';
+  if(type==='spread' && /待確認|盤口/.test(raw)) return '待確認';
+  return raw.length>8 ? raw.slice(0,8)+'…' : (raw || '待確認');
+}
+function marketMini(label,val,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-xl border ${cls} p-2 overflow-hidden"><div class="text-[11px] font-black">${label}</div><div class="market mt-1 truncate" title="${String(val||'')}">${val}</div></div>`; }
 
 function closeGame(){ $('gameModal').classList.add('hidden'); document.body.classList.remove('modal-open'); }
 function buildGameData(g){
@@ -725,11 +741,17 @@ function buildGameData(g){
     copy.topTitle='雙方先發';
     copy.top=aj.starters.map(x=>({team:x.team||'',name:x.name||'先發待公布',role:x.role||'先發',stats:cleanStats(x.stats,[["ERA","待更新"],["WHIP","待更新"],["勝投","待更新"],["敗投","待更新"],["近況","待更新"]])}));
   }
-  if(Array.isArray(aj.core_players) && aj.core_players.length){
+  if(g.sport==='football'){
+    copy.topTitle='雙方近況分析';
+    copy.footballSummary = aj.football_summary || {
+      home: `${g.away} 主場近況與陣容狀態待更新。`,
+      away: `${g.home} 客場近況與攻防效率待更新。`,
+      conclusion: '目前以近期狀態、主客場表現與盤口方向綜合判斷，詳細資料會由資料中心每小時補齊。'
+    };
+  } else if(Array.isArray(aj.core_players) && aj.core_players.length){
     copy.topTitle='核心球員數據';
     const players=aj.core_players.map(x=>({team:x.team||'',name:String(x.name||'核心球員待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩/g,''),role:x.role||'隊伍資料',award:String(x.award||'近期狀態待更新').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,''),stats:cleanStats(x.stats,[["近況","待更新"],["主客場","待更新"],["傷停","待更新"]])}));
-    if(g.sport==='football') copy.top=[...players,...players].slice(0,6);
-    else copy.top=players;
+    copy.top=players;
   }
   if(Array.isArray(aj.metrics)&&aj.metrics.length) copy.metrics=aj.metrics;
   if(Array.isArray(aj.injuries)&&aj.injuries.length) copy.injuries=aj.injuries;
@@ -744,13 +766,27 @@ function openGame(i,tab='data'){
   $('gameModal').classList.remove('hidden'); document.body.classList.add('modal-open');
   $('modalLeague').textContent=`${state.league}｜${g.time}`;
   $('modalTitle').textContent=gameDisplayTitle(g);
-  const dataHtml=`${summaryCards(g)}${section(d.topTitle,topBlock(d.top,g.sport))}${section('傷員狀況',injuries(d.injuries,g.sport))}${section('雙方對比',comparison(d.metrics,g.away,g.home))}${section('雙方歷史對戰',h2h(d.h2h))}${section('雙方近期賽況',recent(d.recent))}`;
+  const dataHtml = g.sport==='football'
+    ? `${summaryCards(g)}${section('雙方近況分析',footballAnalysis(d,g))}${section('近期對戰',h2h(d.h2h))}${section('近期賽況',recent(d.recent))}`
+    : `${summaryCards(g)}${section(d.topTitle,topBlock(d.top,g.sport))}${section('傷員狀況',injuries(d.injuries,g.sport))}${section('雙方對比',comparison(d.metrics,g.away,g.home))}${section('雙方歷史對戰',h2h(d.h2h))}${section('雙方近期賽況',recent(d.recent))}`;
   const boardHtml=`${section('',pundits(g))}${section('',playerComments())}`;
   $('modalBody').innerHTML=`<div class="comment-tabs"><button class="comment-tab ${tab==='data'?'active':''}" onclick="openGame(${i},'data')">查看數據</button><button class="comment-tab ${tab==='board'?'active':''}" onclick="openGame(${i},'board')">留言板</button></div>${tab==='data'?dataHtml:boardHtml}`;
 }
 function section(title,body){ return `<section class="soft rounded-2xl p-4">${title?`<h3 class="section-title">${title}</h3>`:''}${body}</section>`; }
-function summaryCards(g){ return `<section class="grid lg:grid-cols-3 gap-4">${mainMarket('獨贏參考',g.money,g.conf[0],'大眾參考方向','emerald')}${mainMarket('讓分盤',g.spread,g.conf[1],'過盤參考率','blue')}${mainMarket('大小分',g.total,g.conf[2],'方向參考率','pink')}</section>`; }
+function summaryCards(g){
+  const money = g.sport==='football' ? shortFootballMarket(g.money,'money') : g.money;
+  const spread = g.sport==='football' ? shortFootballMarket(g.spread,'spread') : g.spread;
+  const total = shortFootballMarket(g.total,'total');
+  return `<section class="grid lg:grid-cols-3 gap-4">${mainMarket('獨贏參考',money,g.conf[0],'大眾參考方向','emerald')}${mainMarket(g.sport==='football'?'讓分參考':'讓分盤',spread,g.conf[1],g.sport==='football'?'盤口待補':'過盤參考率','blue')}${mainMarket('大小分',total,g.conf[2],'方向參考率','pink')}</section>`;
+}
 function mainMarket(title,val,pct,sub,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-2xl border ${cls} p-4"><div class="text-xs font-black">${title}</div><div class="market-big mt-2">${val}</div><div class="flex justify-between mt-4 text-sm font-black"><span>${sub}</span><span>${pct}%</span></div><div class="conf mt-2"><i style="width:${pct}%"></i></div></div>`; }
+function footballAnalysis(d,g){
+  const fs=d.footballSummary||{};
+  const homeTxt=String(fs.home||`${g.away} 主隊近況待更新。`).replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
+  const awayTxt=String(fs.away||`${g.home} 客隊近況待更新。`).replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
+  const con=String(fs.conclusion||'系統會依近期狀態、主客場表現與盤口方向更新分析。').replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
+  return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-amber-400/20 p-4"><div class="text-amber-300 font-black mb-2">主隊｜${g.away}</div><p class="text-slate-300 font-bold leading-7">${homeTxt}</p></div><div class="rounded-2xl bg-slate-900/75 border border-blue-400/20 p-4"><div class="text-blue-300 font-black mb-2">客隊｜${g.home}</div><p class="text-slate-300 font-bold leading-7">${awayTxt}</p></div><div class="md:col-span-2 rounded-2xl bg-slate-950 border border-slate-800 p-4"><div class="text-emerald-300 font-black mb-2">AI綜合判斷</div><p class="text-slate-300 font-bold leading-7">${con}</p></div></div>`;
+}
 function topBlock(rows,sport){ if(sport==='football'){ const left=rows.slice(0,3), right=rows.slice(3,6); return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-a mb-3">${left[0].team}</div><div class="space-y-3">${left.map((r,idx)=>footballPlayer(r,idx+1,'a')).join('')}</div></div><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-b mb-3">${right[0].team}</div><div class="space-y-3">${right.map((r,idx)=>footballPlayer(r,idx+1,'b')).join('')}</div></div></div>`; } return `<div class="grid md:grid-cols-2 gap-4">${rows.map(r=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="text-sm text-slate-500">${r.team}</div><div class="text-xl font-black mt-1">${r.name} <span class="hero-tag">${r.role}</span></div><div class="inline-stats mt-4 pitcher-stats">${r.stats.map(s=>`<div class="inline-stat"><div class="v">${s[1]}</div><div class="k">${s[0]}</div></div>`).join('')}</div></div>`).join('')}</div>`; }
 function footballPlayer(r,no,tone){ return `<div class="rounded-2xl ${tone==='a'?'bg-sky-400/5 border-sky-400/20':'bg-amber-400/5 border-amber-400/20'} border p-4"><div class="flex items-center justify-between gap-3"><div><div class="text-sm font-black ${tone==='a'?'text-blue-300':'text-amber-300'}">第 ${no} 核心</div><div class="text-lg font-black mt-1">${r.name}</div></div><span class="hero-tag">${r.role}</span></div><div class="text-xs text-slate-400 mt-2 leading-5">${r.award||''}</div></div>`; }
 function injuries(rows,sport){ if(sport==='baseball'){ const teams=[...new Set(rows.map(r=>r[0]))]; return `<div class="grid md:grid-cols-2 gap-4">${teams.map((team,idx)=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="font-black ${idx===0?'text-blue-300':'text-amber-300'} mb-3">${team}</div><div class="space-y-2">${rows.filter(r=>r[0]===team).map(r=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 flex justify-between gap-3"><div><div class="font-black text-sm">${r[1]}</div><div class="text-xs text-slate-400 mt-1">${r[2]}</div></div><div class="text-xs text-pink-300 font-black shrink-0">${r[3]}</div></div>`).join('')}</div></div>`).join('')}</div>`; } return `<div class="grid md:grid-cols-2 gap-2">${rows.map(r=>`<div class="rounded-xl bg-slate-900/75 border border-slate-800 p-3 flex justify-between gap-3"><div><div class="font-black">${r[0]}｜${r[1]}</div><div class="text-sm text-slate-400 mt-1">${r[2]}</div></div><div class="text-xs text-pink-300 font-black shrink-0">${r[3]}</div></div>`).join('')}</div>`; }
