@@ -1,1 +1,1 @@
-v113 MLB safe pitchers + football variation
+v114 footballTeamNote initialization fix

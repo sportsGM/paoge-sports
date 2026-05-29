@@ -684,29 +684,33 @@ function pickVariant(seed, arr) {
 function isGenericIntelText(text) {
   return /未完全明確|需配合臨場|資料整理模型|主要判斷|待更新|未公布|資料未完|尚未明確/.test(String(text || ''));
 }
+
+function footballTeamNote(team, side, seed='') {
+  return pickVariant(`${seed}|${team}|${side}|footballTeamV114`, [
+    `${team} 這邊要先看開局壓迫與防線回收速度，若前 20 分鐘能穩住節奏，${side} 方向會比較有延展空間。`,
+    `${team} 的重點不是單純控球率，而是禁區前沿的推進效率；若臨場陣型偏保守，大小分要比勝負更謹慎。`,
+    `${team} 近期判斷會以攻守轉換速度與定位球防守為主，若早段失球，原本盤口優勢會被明顯削弱。`,
+    `${team} 這場需要觀察邊路突破和反擊品質，若無法製造足夠射門，獨贏方向即使看好也不宜追太深。`,
+    `${team} 的盤口價值取決於臨場名單與主客場節奏，若水位沒有同步支持，建議保留部分空間等開賽前確認。`,
+    `${team} 若能把比賽壓在自己熟悉的節奏，盤口容錯會提升；但若被迫拉快攻防轉換，大小分變數會增加。`
+  ]);
+}
 function buildSearchBasedAnalysis(game, searchRows) {
   const aj = game.analysis_json || {};
   const away = aj.true_away || game.home;
   const home = aj.true_home || game.away;
   const searchText = cleanAnalysisText(compactSearchDoc(searchRows));
+  const marketSeed = `${game.league}|${away}|${home}|${game.money}|${game.spread}|${game.total}|${game.game_time}`;
   const support = estimateMarketSupport(game, searchText);
   const picks = chooseMainAndSecond(game, support);
   const hasSearch = searchRows.length > 0;
-  const recentAway = game.sport === 'football' ? footballTeamNote(away, '客隊') : sentenceFromSearch(searchText, [away, '近況', '近期', '戰績', '連勝', '連敗'], `${away} 近期狀態需配合臨場名單與盤口變化觀察。`);
-  const recentHome = game.sport === 'football' ? footballTeamNote(home, '主隊') : sentenceFromSearch(searchText, [home, '近況', '近期', '戰績', '主場', '客場'], `${home} 近期狀態需配合臨場名單與盤口變化觀察。`);
+  const recentAway = game.sport === 'football' ? footballTeamNote(away, '客隊', marketSeed) : sentenceFromSearch(searchText, [away, '近況', '近期', '戰績', '連勝', '連敗'], `${away} 近期狀態需配合臨場名單與盤口變化觀察。`);
+  const recentHome = game.sport === 'football' ? footballTeamNote(home, '主隊', marketSeed) : sentenceFromSearch(searchText, [home, '近況', '近期', '戰績', '主場', '客場'], `${home} 近期狀態需配合臨場名單與盤口變化觀察。`);
   const h2hNote = sentenceFromSearch(searchText, ['對戰', '交手', '歷史', 'head to head', 'H2H'], `雙方歷史對戰資料未完全明確，本場先以盤口深淺與近期狀態作主要判斷。`);
-  const marketSeed = `${game.league}|${away}|${home}|${game.money}|${game.spread}|${game.total}|${game.game_time}`;
   const noSpreadAdvice = game.sport === 'football' && /無建議|待確認|未開盤/.test(String(game.spread || ''));
   const spreadText = noSpreadAdvice ? '讓球盤尚未提供明確可用方向' : (game.spread || '讓分盤');
   const moneyText = game.money || '獨贏待確認';
   const totalText = game.total || '大小待確認';
-  const footballTeamNote = (team, side) => pickVariant(`${marketSeed}|${team}|${side}|footballTeamV113`, [
-    `${team} 這邊要先看開局壓迫與防線回收速度，若前 20 分鐘能穩住節奏，${side} 方向會比較有延展空間。`,
-    `${team} 的重點不是單純控球率，而是禁區前沿的推進效率；若臨場陣型偏保守，大小分要比勝負更謹慎。`,
-    `${team} 近期判斷會以攻守轉換速度與定位球防守為主，若早段失球，原本盤口優勢會被明顯削弱。`,
-    `${team} 這場需要觀察邊路突破和反擊品質，若無法製造足夠射門，獨贏方向即使看好也不宜追太深。`,
-    `${team} 的盤口價值取決於臨場名單與主客場節奏，若水位沒有同步支持，建議保留部分空間等開賽前確認。`
-  ]);
   const sportTone = game.sport === 'football'
     ? pickVariant(marketSeed + '|sportToneV113', [
         `足球盤最怕和局與早段紅黃牌改變節奏，本場若${totalText}偏低，進球效率會比控球率更關鍵。`,
