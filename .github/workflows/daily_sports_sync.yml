@@ -1,4 +1,4 @@
-name: Daily 2AM sports sync v94 yahoo matchup fix
+name: Daily 2AM sports sync v95 no google fallback
 
 on:
   schedule:
