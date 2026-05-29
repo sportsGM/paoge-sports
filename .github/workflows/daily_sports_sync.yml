@@ -1,4 +1,4 @@
-name: Hourly sports sync v56
+name: Hourly sports sync v57
 
 on:
   schedule:
@@ -9,7 +9,6 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
