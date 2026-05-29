@@ -1,1 +1,1 @@
-v66_LEAGUE_URL_TODAY_TOMORROW
+v67 data detail enrichment
