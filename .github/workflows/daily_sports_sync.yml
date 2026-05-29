@@ -1,4 +1,4 @@
-name: Daily 2AM sports sync v92 football tomorrow
+name: Daily 2AM sports sync v93 fix
 
 on:
   schedule:
