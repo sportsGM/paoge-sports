@@ -4,7 +4,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in GitHub Secrets');
 
-// v93：修正 US_SHIFT_LEAGUES 未定義錯誤；Google CSE 錯誤不影響主同步
+// v94：Yahoo 運動單場頁配對加強；用隊名別名 + 寬鬆候選連結補抓 TEAM MATCHUPS / RECENT GAMES
 // 玩運彩只抓賽事與運彩盤口；Yahoo 運動用指定日期 scoreboard 補 MLB / CPBL 等數據；OpenAI 可選用來統整所有數據成 AI 分析。
 const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'google').toLowerCase();
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
@@ -758,14 +758,40 @@ function yahooLeagueKey(game){
   if(game.sport === 'football') return 'football';
   return '';
 }
+const TEAM_ALIASES = {
+  // MLB 中文常見別名 / Yahoo 顯示名
+  '勇士':['勇士','亞特蘭大','Braves','ATL','Atlanta'], '紅人':['紅人','辛辛那提','Reds','CIN','Cincinnati'],
+  '洋基':['洋基','紐約洋基','Yankees','NYY'], '道奇':['道奇','洛杉磯道奇','Dodgers','LAD'],
+  '紅襪':['紅襪','波士頓','Red Sox','BOS'], '大都會':['大都會','紐約大都會','Mets','NYM'],
+  '國民':['國民','華盛頓','Nationals','WSH'], '小熊':['小熊','芝加哥小熊','Cubs','CHC'],
+  '費城人':['費城人','費城','Phillies','PHI'], '馬林魚':['馬林魚','邁阿密','Marlins','MIA'],
+  '太空人':['太空人','休士頓','Astros','HOU'], '遊騎兵':['遊騎兵','德州','Rangers','TEX'],
+  '教士':['教士','聖地牙哥','Padres','SD'], '巨人':['巨人','舊金山','Giants','SF'],
+  '天使':['天使','洛杉磯天使','Angels','LAA'], '老虎':['老虎','底特律','Tigers','DET'],
+  '藍鳥':['藍鳥','多倫多','Blue Jays','TOR'], '海盜':['海盜','匹茲堡','Pirates','PIT'],
+  '水手':['水手','西雅圖','Mariners','SEA'], '皇家':['皇家','堪薩斯','Royals','KC'],
+  '雙城':['雙城','明尼蘇達','Twins','MIN'], '釀酒人':['釀酒人','密爾瓦基','Brewers','MIL'],
+  '紅雀':['紅雀','聖路易','Cardinals','STL'], '白襪':['白襪','芝加哥白襪','White Sox','CWS'],
+  '光芒':['光芒','坦帕灣','Rays','TB'], '洛磯':['洛磯','科羅拉多','Rockies','COL'],
+  '守護者':['守護者','克里夫蘭','Guardians','CLE'], '響尾蛇':['響尾蛇','亞利桑那','Diamondbacks','ARI'],
+  // CPBL
+  '統一':['統一','統一獅','Uni Lions','Lions'], '味全':['味全','味全龍','Dragons'],
+  '中信':['中信','中信兄弟','兄弟','Brothers'], '兄弟':['兄弟','中信兄弟','Brothers'],
+  '富邦':['富邦','富邦悍將','Guardians'], '樂天':['樂天','樂天桃猿','桃猿','Monkeys'],
+  '台鋼':['台鋼','台鋼雄鷹','雄鷹','Hawks']
+};
 function teamTokens(name=''){
   const t=cleanTeamName(name);
-  const arr=[t];
+  const arr=[t, ...(TEAM_ALIASES[t]||[])];
+  // 若隊名包含空白或前綴，補最後詞 / 去除城市詞提高 Yahoo 配對率。
   if(/[A-Za-z]/.test(t)){
     const parts=t.split(/\s+/).filter(Boolean);
     if(parts.length) arr.push(parts[parts.length-1]);
   }
-  return [...new Set(arr.filter(x=>x && x.length>=2))];
+  for(const [k,v] of Object.entries(TEAM_ALIASES)){
+    if(t.includes(k) || v.some(a=>String(a).toLowerCase()===t.toLowerCase())) arr.push(k, ...v);
+  }
+  return [...new Set(arr.map(x=>String(x||'').trim()).filter(x=>x && x.length>=2))];
 }
 function textContainsTeam(text, team){
   const raw=String(text||'').toLowerCase();
@@ -808,14 +834,27 @@ async function buildYahooScoreboardCache(context, games){
   return cache;
 }
 function yahooCandidateLinksFromScoreboard(game, board){
-  const away=(game.analysis_json||{}).true_away || game.home;
-  const home=(game.analysis_json||{}).true_home || game.away;
-  const links=(board?.links||[]).filter(a=>{
+  const aj=game.analysis_json||{};
+  const away=aj.true_away || game.home;
+  const home=aj.true_home || game.away;
+  const all=(board?.links||[]).filter(a=>a.href && /tw\.sports\.yahoo\.com/.test(a.href));
+  const direct=all.filter(a=>{
     const hay=`${a.text} ${decodeURIComponent(a.href||'')}`;
     return textContainsTeam(hay,away) && textContainsTeam(hay,home);
   });
+  const sameLeague=all.filter(a=>{
+    const h=a.href||'';
+    if(/scoreboard|standings|teams|players|news|video|fantasy|betting/i.test(h)) return false;
+    if(game.league==='MLB') return /\/mlb\//i.test(h);
+    if(game.league==='CPBL') return /\/cpbl\//i.test(h);
+    if(game.league==='NBA') return /\/nba\//i.test(h);
+    if(game.league==='WNBA') return /\/wnba\//i.test(h);
+    return /\/soccer\//i.test(h);
+  });
+  // 先精準雙隊名，其次同聯盟候選頁。後面 fetch 後仍會檢查是否真的包含雙隊，避免塞錯。
+  const merged=[...direct, ...sameLeague];
   const seen=new Set();
-  return links.filter(x=>!seen.has(x.href)&&seen.add(x.href)).slice(0,3).map(x=>x.href);
+  return merged.filter(x=>!seen.has(x.href)&&seen.add(x.href)).slice(0,8).map(x=>x.href);
 }
 function parseYahooPitcherStatsFromBlock(allText, pitcherName){
   const raw=String(allText||'').replace(/\s+/g,' ');
