@@ -71,6 +71,12 @@ function dateTW(offsetDays = 0) {
   now.setDate(now.getDate() + offsetDays);
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
+function addIsoDays(iso, offsetDays = 0) {
+  const d = new Date(`${iso}T12:00:00+08:00`);
+  d.setDate(d.getDate() + offsetDays);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+}
+function isoDateUnique(list) { return [...new Set(list.filter(Boolean))]; }
 function mdTW(offsetDays = 0) {
   const d = dateTW(offsetDays).split('-');
   return `${d[1]}/${d[2]}`;
@@ -656,14 +662,14 @@ function estimateMarketSupport(game, searchText) {
   const moneyPct = Math.max(Number(game.confidence?.[0] || 58), pctFromTextSeed(game.away + game.home + game.money, 55, 72));
   const spreadPct = Math.max(Number(game.confidence?.[1] || 56), pctFromTextSeed(game.spread + searchText.slice(0,80), 53, 70));
   const totalPct = Math.max(Number(game.confidence?.[2] || 55), pctFromTextSeed(game.total + searchText.slice(80,160), 52, 68));
-  return { money: moneyPct, spread: spreadPct, total: totalPct };
+  return { money: moneyPct, spread: (game.sport === 'football' && /無建議|待確認|未開盤/.test(String(game.spread||''))) ? null : spreadPct, total: totalPct };
 }
 function chooseMainAndSecond(game, support) {
   const rows = [
     { key: '獨贏', pick: game.money || '獨贏待確認', pct: support.money || 0 },
     { key: '讓分', pick: game.spread || '讓分待確認', pct: support.spread || 0 },
     { key: '大小', pick: game.total || '大小待確認', pct: support.total || 0 }
-  ].filter(x => !/待確認|待更新/.test(x.pick));
+  ].filter(x => !/待確認|待更新|無建議|未開盤/.test(x.pick));
   rows.sort((a,b)=>b.pct-a.pct);
   return { safest: rows[0]?.pick || game.money || game.spread || game.total || '待確認', main: rows[0]?.pick || '待確認', second: rows[1]?.pick || rows[0]?.pick || '待確認', confidence: rows[0]?.pct >= 70 ? '高' : rows[0]?.pct >= 62 ? '中高' : rows[0]?.pct >= 56 ? '中' : '低' };
 }
@@ -709,22 +715,23 @@ function buildSearchBasedAnalysis(game, searchRows) {
           `棒球讓分容錯較低，若盤口偏向一方但大小分沒有同步放大，代表市場可能更看重投手壓制。`,
           `若雙方牛棚近期消耗偏高，後段失分風險會放大，大小分比獨贏更需要臨場確認。`
         ]);
-  const summary = hasSearch
-    ? `綜合目前賽事盤口與已整理到的公開資料，本場市場方向較偏向「${picks.main}」。${game.spread || ''} 與 ${game.total || ''} 是主要觀察點，若臨場盤沒有明顯反向修正，主推方向可延續。`
-    : pickVariant(marketSeed + 'summary', [
-        `目前以玩運彩已開出的盤口做判斷，本場市場重心偏向「${picks.main}」。${game.spread || '讓分盤'}與${game.total || '大小分'}需要一起觀察，盤口若沒有反向修正，主推方向可延續。`,
-        `這場可先從盤口深淺切入：獨贏方向給出基本傾向，讓分與大小分則決定進場風險。目前模型較支持「${picks.main}」，副推可用「${picks.second}」分散風險。`,
-        `本場沒有使用外部搜尋補強時，會以盤口、聯盟特性與隊伍對位做保守模型判斷。目前較值得關注的是「${picks.main}」，臨場若盤口加深需降低注碼。`,
-        `盤口已開出的情況下，這場可以先看市場是否集中在單邊。模型目前給「${picks.main}」較高權重，但${game.total || '大小分'}仍要留意臨場變動。`
-      ]);
-  const risk = hasSearch
-    ? sportTone
-    : pickVariant(marketSeed + 'risk', [
-        sportTone,
-        `本場最大風險在於臨場盤口與名單資訊仍可能變動，若賽前水位突然反向，原本主推方向要降級看待。`,
-        `若盤口尚未完全穩定，建議避免同時重壓讓分與大小分；主推以單一方向為主，副推只作參考。`,
-        `目前模型分數屬於賽前參考，若開賽前出現傷停、投手或先發異動，必須重新評估過盤機率。`
-      ]);
+  const summaryPool = [
+    `本場是${game.league}賽事，${away} 對上 ${home}，目前盤口重心落在「${picks.main}」。從${game.money || '獨贏盤'}、${game.spread || '讓分盤'}與${game.total || '大小分'}交叉看，這場比較適合用主推單一方向控管風險。`,
+    `${away} 與 ${home} 這場的盤口結構不算單純，獨贏方向雖有傾向，但真正決定投注價值的是${game.spread || '讓分盤'}能不能支撐。模型目前把「${picks.main}」排在第一順位。`,
+    `以目前玩運彩已開出的盤來看，${game.league} 這場市場並沒有完全平均分散，${picks.main} 是比較明確的觀察點；副推「${picks.second}」則適合小注搭配，不建議三盤全追。`,
+    `這場${away} vs ${home} 的重點在盤口是否過深。若臨場沒有反向變盤，主推仍以「${picks.main}」為主，但若賽前水位突然修正，就要把信心降一階。`,
+    `綜合隊名對位、開賽時間與目前盤口，系統給「${picks.main}」較高權重。${game.total || '大小分'}可以作為第二觀察方向，但仍要避免盤口未穩時重壓。`
+  ];
+  const searchedLine = hasSearch && searchText.length >= 20 ? ` 已整理到的公開資料會優先影響近況判斷，但精準數字仍以已抓到欄位為準。` : '';
+  const summary = pickVariant(marketSeed + 'summaryV110', summaryPool) + searchedLine;
+  const riskPool = [
+    `${sportTone} 這場若臨場盤口突然往相反方向修正，代表市場資金可能出現變化，原本主推要保守看待。`,
+    `風險主要在${game.spread || '讓分盤'}與${game.total || '大小分'}同時變動時，若兩個方向互相矛盾，建議只留主推，不要硬追副推。`,
+    `若賽前名單、先發或天候資訊出現異動，本場 AI 量表要重新檢查；目前結論只適用於當下已開盤盤口。`,
+    `這場不適合只看人氣方向，因為${picks.main}雖然分數較高，但若開賽前盤口被拉深，過盤難度會同步提高。`,
+    `最大變數在臨場投注選項是否縮盤或關盤；若接近開賽時仍維持同方向，主推可信度才會比較穩。`
+  ];
+  const risk = pickVariant(marketSeed + 'riskV110', riskPool);
   return {
     summary, away_recent: recentAway, home_recent: recentHome, h2h_note: h2hNote, risk,
     support,
@@ -756,7 +763,7 @@ function applySearchIntel(game, searchRows) {
   }
   aj.metrics = [
     ['獨贏方向', game.money, `${intel.support.money}%`, intel.support.money, 100-intel.support.money, '盤口/搜尋', '模型'],
-    ['讓分方向', game.spread, `${intel.support.spread}%`, intel.support.spread, 100-intel.support.spread, '盤口/搜尋', '模型'],
+    ...((game.sport === 'football' && /無建議|待確認|未開盤/.test(String(game.spread||''))) ? [] : [['讓分方向', game.spread, `${intel.support.spread}%`, intel.support.spread, 100-intel.support.spread, '盤口/搜尋', '模型']]),
     ['大小分方向', game.total, `${intel.support.total}%`, intel.support.total, 100-intel.support.total, '盤口/搜尋', '模型'],
     ['情蒐可信度', intel.search_available ? '已搜尋' : '盤口模型', intel.picks.confidence, 60, 40, '', '']
   ];
@@ -1193,18 +1200,38 @@ async function enrichMLBOfficialStats(game) {
   const awayId = mlbTeamId(awayName);
   const homeId = mlbTeamId(homeName);
   if (!awayId || !homeId) { aj.api_status = 'mlb_team_id_not_matched'; game.analysis_json = aj; return false; }
-  const date = gameApiDate(game);
-  const season = date.slice(0,4);
+  const baseDate = gameApiDate(game);
+  const candidateDates = isoDateUnique([baseDate, addIsoDays(baseDate, -1), addIsoDays(baseDate, 1)]);
+  const season = baseDate.slice(0,4);
   try {
-    const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${date}&hydrate=probablePitcher,team`;
-    const sched = await fetchJsonUrl(scheduleUrl);
-    const games = (sched?.dates || []).flatMap(d=>d.games || []);
-    const found = games.find(g => {
+    let allGames = [];
+    for (const date of candidateDates) {
+      const scheduleUrl = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${date}&hydrate=probablePitcher,team`;
+      const sched = await fetchJsonUrl(scheduleUrl).catch(e => { console.warn(`MLB schedule failed ${date}:`, e.message); return null; });
+      allGames.push(...((sched?.dates || []).flatMap(d=>d.games || []).map(g=>({...g, _apiDate: date}))));
+    }
+    const gm = timeToMinutes(game.game_time || '');
+    const apiMinutesTW = (g) => {
+      if (!g?.gameDate) return null;
+      const str = new Intl.DateTimeFormat('en-US', { timeZone:'Asia/Taipei', hour:'2-digit', minute:'2-digit', hour12:true }).format(new Date(g.gameDate));
+      return timeToMinutes(str.replace('AM','AM ').replace('PM','PM '));
+    };
+    const candidates = allGames.map(g => {
       const h = g?.teams?.home?.team?.id;
       const a = g?.teams?.away?.team?.id;
-      return (h === homeId && a === awayId) || (h === awayId && a === homeId);
-    });
-    if (!found) { aj.api_status = `mlb_official_no_match_${date}`; game.analysis_json = aj; return false; }
+      const exact = (h === homeId && a === awayId);
+      const reversed = (h === awayId && a === homeId);
+      if (!exact && !reversed) return null;
+      const diff = circularMinuteDiff(gm, apiMinutesTW(g));
+      let score = exact ? 80 : 55;
+      if (diff != null) score += diff <= 30 ? 35 : diff <= 90 ? 22 : diff <= 150 ? 8 : -35;
+      if (g._apiDate === baseDate) score += 12;
+      return { g, score, diff, exact, reversed };
+    }).filter(Boolean).sort((a,b)=>b.score-a.score);
+    const best = candidates[0];
+    const found = best?.score >= 70 ? best.g : null;
+    if (!found) { aj.api_status = `mlb_official_no_match_${candidateDates.join(',')}`; game.analysis_json = aj; return false; }
+    console.log(`MLB official matched: ${awayName} vs ${homeName}, date=${found._apiDate}, score=${best.score}, timeDiff=${best.diff ?? 'NA'}`);
     const homePitcher = found.teams?.home?.probablePitcher;
     const awayPitcher = found.teams?.away?.probablePitcher;
     const homeStarter = (aj.starters || []).find(s => s.team === homeName || s.role?.includes('主'));

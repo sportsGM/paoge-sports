@@ -880,7 +880,8 @@ function summaryCards(g){
   const money = g.sport==='football' ? shortFootballMarket(g.money,'money') : g.money;
   const spread = g.sport==='football' ? shortFootballMarket(g.spread,'spread') : g.spread;
   const total = shortFootballMarket(g.total,'total');
-  return `<section class="grid lg:grid-cols-3 gap-4">${mainMarket('獨贏參考',money,g.conf[0],'大眾參考方向','emerald')}${mainMarket(g.sport==='football'?'讓分參考':'讓分盤',spread,g.conf[1],g.sport==='football'?'讓分參考率':'過盤參考率','blue')}${mainMarket('大小分',total,g.conf[2],'方向參考率','pink')}</section>`;
+  const spreadNoAdvice = g.sport==='football' && /無建議|待確認|未開盤/.test(String(spread||''));
+  return `<section class="grid lg:grid-cols-3 gap-4">${mainMarket('獨贏參考',money,g.conf[0],'大眾參考方向','emerald')}${mainMarket(g.sport==='football'?'讓分參考':'讓分盤',spread,spreadNoAdvice?null:g.conf[1],spreadNoAdvice?'':'過盤參考率','blue')}${mainMarket('大小分',total,g.conf[2],'方向參考率','pink')}</section>`;
 }
 
 function searchIntelBlock(g){
@@ -889,13 +890,15 @@ function searchIntelBlock(g){
   const support=si.support||{}; const picks=si.picks||{};
   const bar=(name,pct,tone)=>`<div class="rounded-2xl bg-slate-950 border border-slate-800 p-4"><div class="flex justify-between text-sm font-black mb-2"><span>${name}</span><span>${pct||0}%</span></div><div class="conf"><i style="width:${pct||0}%"></i></div></div>`;
   const tags=(si.search_titles||[]).slice(0,3).map(t=>`<span class="hero-tag">${String(t).replace(/Yahoo奇摩運動|玩運彩|資料來源|數據來源/g,'').slice(0,28)}</span>`).join(' ');
+  const spreadNoAdvice = g.sport==='football' && /無建議|待確認|未開盤/.test(String(g.spread||''));
+  const barHtml = `${bar('獨贏方向',support.money,'emerald')}${spreadNoAdvice?'':bar('讓分方向',support.spread,'blue')}${bar('大小分方向',support.total,'pink')}`;
   return `<section class="soft rounded-2xl p-4"><h3 class="section-title">AI 情蒐量表</h3>
     <div class="rounded-2xl bg-slate-950 border border-amber-400/20 p-4 mb-4"><div class="text-amber-300 font-black mb-2">AI 情蒐重點</div><p class="text-slate-300 font-bold leading-7">${si.summary}</p><div class="mt-3 flex flex-wrap gap-2">${tags}</div></div>
-    <div class="grid md:grid-cols-3 gap-3 mb-4">${bar('獨贏方向',support.money,'emerald')}${bar('讓分方向',support.spread,'blue')}${bar('大小分方向',support.total,'pink')}</div>
+    <div class="grid md:grid-cols-3 gap-3 mb-4">${barHtml}</div>
     <div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="text-blue-300 font-black mb-2">風險提醒</div><p class="text-slate-300 font-bold leading-7">${si.risk||'臨場盤口與名單異動仍需留意。'}</p></div><div class="rounded-2xl bg-emerald-400/10 border border-emerald-400/20 p-4"><div class="text-xs text-slate-400 font-black">AI 結論</div><div class="text-emerald-300 font-black mt-2">最穩：${picks.safest||'待確認'}</div><div class="text-amber-300 font-black mt-1">主推：${picks.main||'待確認'}</div><div class="text-pink-300 font-black mt-1">副推：${picks.second||'待確認'}</div><div class="text-slate-300 font-black mt-1">信心指數：${picks.confidence||'中'}</div></div></div>
   </section>`;
 }
-function mainMarket(title,val,pct,sub,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-2xl border ${cls} p-4"><div class="text-xs font-black">${title}</div><div class="market-big mt-2">${val}</div><div class="flex justify-between mt-4 text-sm font-black"><span>${sub}</span><span>${pct}%</span></div><div class="conf mt-2"><i style="width:${pct}%"></i></div></div>`; }
+function mainMarket(title,val,pct,sub,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; const hasPct=pct!=null && pct!=='' && !Number.isNaN(Number(pct)); return `<div class="rounded-2xl border ${cls} p-4"><div class="text-xs font-black">${title}</div><div class="market-big mt-2">${val}</div>${hasPct?`<div class="flex justify-between mt-4 text-sm font-black"><span>${sub}</span><span>${pct}%</span></div><div class="conf mt-2"><i style="width:${pct}%"></i></div>`:''}</div>`; }
 function footballAnalysis(d,g){
   const fs=d.footballSummary||{};
   const homeTxt=String(fs.home||`${g.away} 主隊近況待更新。`).replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
