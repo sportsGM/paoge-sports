@@ -9,7 +9,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABA
 const SEARCH_PROVIDER = (process.env.SEARCH_PROVIDER || 'off').toLowerCase();
 const SEARCH_API_KEY = process.env.SEARCH_API_KEY || '';
 const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID || '';
-// v111: MLB 官方 API 補近期對戰/近期賽況；近況欄位前台獨立小字；移除假 H2H；AI 文案強化每場差異。
+// v112: 今日/明日全部照玩運彩 today/tomorrow 直讀；足球無建議不提參考率/無建議字樣；AI 文案強化每場差異。
 const SEARCH_FALLBACK_ENABLED = String(process.env.SEARCH_FALLBACK_ENABLED || 'false').toLowerCase() === 'true';
 const SEARCH_ENRICH_LIMIT = Number(process.env.SEARCH_ENRICH_LIMIT || 0);
 const SEARCH_RESULTS_PER_QUERY = Number(process.env.SEARCH_RESULTS_PER_QUERY || 5);
@@ -30,13 +30,11 @@ const TARGETS = [
   { allianceId: 94, label: '中國職籃', sport: 'basketball', league: 'CBA' },
   { allianceId: 4, label: '足球', sport: 'football', league: '足球' }
 ];
-const SHIFT_LEAGUES = new Set(['MLB','NBA','WNBA']);
+const SHIFT_LEAGUES = new Set();
 const US_SHIFT_LEAGUES = SHIFT_LEAGUES;
 const DISPLAY_DAY_TYPES = ['today','tomorrow'];
 function shouldScrapePlaySport(target, dayType) {
-  // MLB / NBA / WNBA：每日只重新抓 tomorrow；today 由前一次同步的 tomorrow 搬過來，避免同一場重複分析。
-  // 足球不套用美國時差搬移；今日=玩運彩 today，明日=玩運彩 tomorrow，兩邊都照實抓。
-  if (SHIFT_LEAGUES.has(target.league)) return dayType === 'tomorrow';
+  // v112：所有分類都照玩運彩 today / tomorrow 直接抓；今日就是今日，明日就是明日。
   return dayType === 'today' || dayType === 'tomorrow';
 }
 function displayDayLabelForLeague(league, dayType = 'today') { return dayType === 'tomorrow' ? '明日賽事' : '今日賽事'; }
@@ -447,11 +445,11 @@ async function scrapePlaySportWithBrowser(options = {}) {
   const games = [];
   const syncDate = dateTW(0);
   try {
-    console.log(`=== 今日/明日賽事雙池 / ${syncDate} ===`);
+    console.log(`=== 今日/明日賽事雙池 / today=${dateTW(0)} tomorrow=${dateTW(1)} ===`);
     for (const target of TARGETS) {
       for (const displayDay of DISPLAY_DAY_TYPES) {
         if (!shouldScrapePlaySport(target, displayDay)) {
-          console.log(`skip scrape ${target.label} ${displayDay}: shift league today uses promoted previous tomorrow rows.`);
+          console.log(`skip scrape ${target.label} ${displayDay}: disabled.`);
           continue;
         }
         const page = await context.newPage();
@@ -471,12 +469,12 @@ async function scrapePlaySportWithBrowser(options = {}) {
           for (const group of groups) {
             group.rawDayType = displayDay;
             group.dayType = displayDay;
-            group.syncDate = syncDate;
+            group.syncDate = displayDay === 'tomorrow' ? dateTW(1) : dateTW(0);
             const g = convertGroupToGame(group, target, page.url());
             if (g) {
               g.game_status = group.finished ? 'finished' : 'upcoming';
               g.game_day_type = displayDay;
-              g.game_date = syncDate;
+              g.game_date = group.syncDate;
               games.push(g);
               parsed++;
             }
@@ -698,10 +696,14 @@ function buildSearchBasedAnalysis(game, searchRows) {
   const recentHome = sentenceFromSearch(searchText, [home, '近況', '近期', '戰績', '主場', '客場'], `${home} 近期狀態需配合臨場名單與盤口變化觀察。`);
   const h2hNote = sentenceFromSearch(searchText, ['對戰', '交手', '歷史', 'head to head', 'H2H'], `雙方歷史對戰資料未完全明確，本場先以盤口深淺與近期狀態作主要判斷。`);
   const marketSeed = `${game.league}|${away}|${home}|${game.money}|${game.spread}|${game.total}|${game.game_time}`;
+  const noSpreadAdvice = game.sport === 'football' && /無建議|待確認|未開盤/.test(String(game.spread || ''));
+  const spreadText = noSpreadAdvice ? '讓球盤尚未提供明確可用方向' : (game.spread || '讓分盤');
+  const moneyText = game.money || '獨贏待確認';
+  const totalText = game.total || '大小待確認';
   const sportTone = game.sport === 'football'
     ? pickVariant(marketSeed, [
-        `足球盤最怕和局與早段紅黃牌改變節奏，本場若${game.total || '大小盤'}偏低，進球效率會比控球率更關鍵。`,
-        `足球賽事要先看盤口是否願意給讓球空間；若讓分顯示「無建議」，代表獨贏與大小分會是比較主要的觀察方向。`,
+        `足球盤最怕和局與早段紅黃牌改變節奏，本場若${totalText}偏低，進球效率會比控球率更關鍵。`,
+        `足球賽事要先看盤口是否給出明確讓球空間；若沒有讓球盤，獨贏與大小分會是比較主要的觀察方向。`,
         `此類足球盤通常要防守上半場節奏過慢，若臨場水位沒有明顯往主隊傾斜，追深盤要保守。`
       ])
     : game.sport === 'basketball'
@@ -717,26 +719,26 @@ function buildSearchBasedAnalysis(game, searchRows) {
         ]);
   const timeNote = game.game_time ? `開賽時間落在 ${game.game_time}` : '開賽時間仍以盤口頁為準';
   const summaryPool = [
-    `${game.league} 這場 ${away} 對 ${home}，${timeNote}；盤口目前給出「${game.money || '獨贏待確認'}、${game.spread || '讓分待確認'}、${game.total || '大小待確認'}」，模型先把「${picks.main}」排在主觀察。`,
-    `這場不是單看人氣就能下，${away} 與 ${home} 的盤口重點在 ${game.spread || '讓分盤'} 是否合理；目前主推「${picks.main}」，副推則用「${picks.second}」分散風險。`,
+    `${game.league} 這場 ${away} 對 ${home}，${timeNote}；盤口目前給出「${moneyText}、${spreadText}、${totalText}」，模型先把「${picks.main}」排在主觀察。`,
+    `這場不是單看人氣就能下，${away} 與 ${home} 的盤口重點在 ${spreadText} 是否合理；目前主推「${picks.main}」，副推則用「${picks.second}」分散風險。`,
     `以 ${away} vs ${home} 的盤型來看，獨贏與大小分方向沒有完全重疊，若臨場盤口維持不變，系統會優先考慮「${picks.main}」。`,
-    `${game.league} 本場的核心是盤口深度：${game.spread || '讓分未開'} 搭配 ${game.total || '大小未開'}，若沒有反向變盤，「${picks.main}」比其他方向更有連貫性。`,
+    `${game.league} 本場的核心是盤口深度：${game.spread || '讓分未開'} 搭配 ${totalText}，若沒有反向變盤，「${picks.main}」比其他方向更有連貫性。`,
     `目前已開盤資訊顯示，${home} 與 ${away} 的對位會受臨場名單影響，但從盤口結構看，「${picks.main}」仍是比較明確的第一順位。`,
     `這場 ${away} 作客、${home} 主場，模型會把開賽時間、讓分深度與大小分位置一起看；目前結論偏向「${picks.main}」，不建議三盤全押。`,
-    `若只看單一盤容易誤判，${game.money || '獨贏'} 與 ${game.total || '大小分'} 要交叉確認；本場暫以「${picks.main}」作為主推方向。`
+    `若只看單一盤容易誤判，${moneyText} 與 ${totalText} 要交叉確認；本場暫以「${picks.main}」作為主推方向。`
   ];
   const searchedLine = hasSearch && searchText.length >= 20 ? ` 已整理到的公開資料會優先影響近況判斷，但精準數字仍以已抓到欄位為準。` : '';
-  const summary = pickVariant(marketSeed + 'summaryV110', summaryPool) + searchedLine;
+  const summary = pickVariant(marketSeed + 'summaryV112', summaryPool) + searchedLine;
   const riskPool = [
-    `${sportTone} 若臨場盤口從「${game.spread || '讓分盤'}」突然改深，${picks.main} 的過盤壓力會提高，建議降低注碼。`,
-    `本場最大風險是 ${game.total || '大小分'} 與 ${game.spread || '讓分盤'} 方向不同步；若臨場兩盤互相打架，就只保留主推。`,
+    `${sportTone} 若臨場盤口從「${spreadText}」突然改深，${picks.main} 的過盤壓力會提高，建議降低注碼。`,
+    `本場最大風險是 ${totalText} 與 ${spreadText} 方向不同步；若臨場兩盤互相打架，就只保留主推。`,
     `若賽前名單、先發、天候或輪休有異動，${away} vs ${home} 的判斷要重新看，現在結論只適用目前盤口。`,
     `${picks.main} 雖然是目前第一順位，但若接近開賽前投注選項縮盤或關盤，代表市場不確定性升高。`,
-    `如果 ${game.money || '獨贏盤'} 與 ${game.spread || '讓分盤'} 的方向出現反向修正，這場不要硬追副推，等臨場確認。`,
-    `${away} 與 ${home} 若開局節奏和預期不同，${game.total || '大小盤'} 會最先受影響，大小分方向要特別保守。`,
+    `如果 ${moneyText} 與 ${spreadText} 的方向出現反向修正，這場不要硬追副推，等臨場確認。`,
+    `${away} 與 ${home} 若開局節奏和預期不同，${totalText} 會最先受影響，大小分方向要特別保守。`,
     `此場風險不在有沒有方向，而是在盤口是否已經反映過多期待；若水位被拉低，主推價值會被壓縮。`
   ];
-  const risk = pickVariant(marketSeed + 'riskV110', riskPool);
+  const risk = pickVariant(marketSeed + 'riskV112', riskPool);
   return {
     summary, away_recent: recentAway, home_recent: recentHome, h2h_note: h2hNote, risk,
     support,
@@ -1152,9 +1154,8 @@ function mlbTeamId(name='') {
   return null;
 }
 function gameApiDate(game) {
-  const rawDay = game.raw_data?.raw_day_type || game.game_day_type || 'today';
-  if (US_SHIFT_LEAGUES.has(game.league) && rawDay === 'tomorrow') return dateTW(1);
-  return game.game_date || dateTW(0);
+  // v112：MLB 也照該場 game_date 對應，不再用搬移邏輯推日期。
+  return game.game_date || (game.game_day_type === 'tomorrow' ? dateTW(1) : dateTW(0));
 }
 async function fetchMlbPitcherSeason(playerId, season) {
   if (!playerId) return null;
@@ -1516,24 +1517,10 @@ async function writeRawSportsData(rows) {
 }
 
 async function loadPromotedTomorrowRows() {
-  // MLB / NBA / WNBA：把前一次同步的明日賽事搬到今日賽事，避免今天再抓一次同場並重複分析。足球不搬移，明日賽事直接讀 gameday=tomorrow。
-  try {
-    const rows = await supabaseRequest('daily_games?game_day_type=eq.tomorrow&active=eq.true&select=*&limit=500', { method: 'GET' });
-    const picked = Array.isArray(rows) ? rows.filter(r => SHIFT_LEAGUES.has(r.league)) : [];
-    const promoted = picked.map(r => ({
-      ...r,
-      game_date: dateTW(0),
-      game_day_type: 'today',
-      updated_at: nowISO(),
-      analysis_json: { ...(r.analysis_json || {}), market_day_label: '今日賽事', promoted_from_previous_tomorrow: true }
-    }));
-    console.log(`Promoted previous tomorrow rows to today for shift leagues: ${promoted.length}`);
-    return promoted;
-  } catch (e) {
-    console.warn('promote previous tomorrow rows skipped:', e.message);
-    return [];
-  }
+  // v112：不再把明日搬到今日。今日讀 today，明日讀 tomorrow。
+  return [];
 }
+
 
 function dedupeGames(rows) {
   const seen = new Set();
@@ -1654,7 +1641,7 @@ async function upsertDailyGames(rows) {
     headers: { Prefer: 'return=minimal' },
     body: JSON.stringify(cleanRows)
   });
-  await writeSyncStatus('success', `v111 synced ${cleanRows.length} valid games`, cleanRows.length);
+  await writeSyncStatus('success', `v112 synced ${cleanRows.length} valid games`, cleanRows.length);
 }
 
 async function main() {
@@ -1664,7 +1651,7 @@ async function main() {
   const incremental = SYNC_MODE === 'incremental';
   const scraped = await scrapePlaySportWithBrowser({ skipEnrichment: incremental });
   const games = [...promoted, ...scraped];
-  console.log(`Parsed valid games v111 today/tomorrow: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
+  console.log(`Parsed valid games v112 today/tomorrow: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   if (incremental) {
     await incrementalDailyGames(games);
