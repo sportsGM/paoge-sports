@@ -1,12 +1,13 @@
 {
   "name": "paoge-longnv-sports-sync",
-  "version": "55.0.0",
+  "version": "52.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "sync:sports": "node scripts/daily_sports_sync.js"
   },
   "dependencies": {
-    "playwright": "^1.49.1"
+    "cheerio": "^1.0.0",
+    "node-fetch": "^3.3.2"
   }
 }

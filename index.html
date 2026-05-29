@@ -2845,7 +2845,17 @@ async function v52LoadDailyGames(){
     const rows=await sbFetch('daily_games',{
       query:`?game_date=eq.${v53DailyGamesDate()}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=120`
     });
-    if(!rows || !rows.length) return;
+    if(!rows || !rows.length){
+      // v54: 如果今日同步抓不到，不要退回靜態示範賽事，避免前台誤以為有今日盤口。
+      const keys=['MLB','CPBL','NPB','NBA','WNBA','ECL','EPL','INT'];
+      keys.forEach(k=>{ if(games[k]) games[k]=[]; });
+      renderGames();
+      const box=document.getElementById('games');
+      if(box) box.innerHTML='<div class="soft rounded-2xl p-6 text-center text-slate-400 font-black">目前沒有抓到此日期賽事資料；若同步失敗，原本今日資料會移到昨日賽事。</div>';
+      const badge=document.querySelector('#gamesBlock .text-emerald-300');
+      if(badge) badge.textContent='資料未抓到';
+      return;
+    }
     const grouped={};
     rows.forEach(r=>{
       const league=r.league || 'MLB';
