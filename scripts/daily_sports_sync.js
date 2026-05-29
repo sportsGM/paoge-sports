@@ -298,7 +298,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v70-raw-data-center', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      parser_version: 'v71-raw-data-center', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
       display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'),
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -430,6 +430,7 @@ async function scrapePlaySportWithBrowser() {
     }
   } finally { }
   await enrichGamesWithDetails(context, games);
+  await enrichMLBGamesWithOfficialStats(games);
   await context.close().catch(()=>{}); await browser.close().catch(()=>{});
   const map = new Map();
   for (const g of games) { const key = `${g.game_day_type}|${g.game_date}|${g.league}|${g.away}|${g.home}|${g.game_time}`; if (!map.has(key)) map.set(key, g); }
@@ -446,6 +447,129 @@ async function safePageText(context, url){
     return await page.evaluate(()=>document.body ? document.body.innerText : '');
   }catch(e){ console.warn('detail page failed:', url, e.message); return ''; }
   finally{ await page.close().catch(()=>{}); }
+}
+
+
+
+// ===== v71: MLB official stats enrichment =====
+// 目的：玩運彩只穩定提供先發姓名與盤口，ERA/WHIP/勝敗改由 MLB Stats API 補齊，避免整包文字塞進欄位。
+const MLB_TEAM_IDS_ZH = {
+  '響尾蛇':109,'勇士':144,'金鶯':110,'紅襪':111,'小熊':112,'白襪':145,'紅人':113,'守護者':114,
+  '落磯':115,'老虎':116,'太空人':117,'皇家':118,'天使':108,'道奇':119,'馬林魚':146,'釀酒人':158,
+  '雙城':142,'大都會':121,'洋基':147,'運動家':133,'費城人':143,'海盜':134,'教士':135,'巨人':137,
+  '水手':136,'紅雀':138,'光芒':139,'遊騎兵':140,'藍鳥':141,'國民':120,'運動家隊':133
+};
+function normalizeTeamNameZh(name){
+  return String(name||'').replace(/\s+/g,'').replace(/隊$/,'').trim();
+}
+function mlbTeamId(name){
+  const n=normalizeTeamNameZh(name);
+  if(MLB_TEAM_IDS_ZH[n]) return MLB_TEAM_IDS_ZH[n];
+  // 部分頁面可能用全名或簡稱混合，做包含比對。
+  for(const [k,v] of Object.entries(MLB_TEAM_IDS_ZH)){
+    if(n.includes(k) || k.includes(n)) return v;
+  }
+  return null;
+}
+function dateShiftISO(dateStr, offset){
+  const d=new Date(`${dateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate()+offset);
+  return d.toISOString().slice(0,10);
+}
+async function fetchJsonSafe(url){
+  try{
+    const res=await fetch(url,{headers:{'user-agent':'Mozilla/5.0','accept':'application/json'}});
+    if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return await res.json();
+  }catch(e){ console.warn('fetchJsonSafe failed:', url, e.message); return null; }
+}
+function statFromSplits(person, key){
+  const splits=person?.stats?.flatMap(s=>s.splits||[]) || [];
+  const stat=splits[0]?.stat || {};
+  if(key==='ERA') return stat.era ?? stat.earnedRunAverage ?? null;
+  if(key==='WHIP') return stat.whip ?? null;
+  if(key==='勝投') return stat.wins ?? null;
+  if(key==='敗投') return stat.losses ?? null;
+  return null;
+}
+async function fetchPitcherSeasonStats(pitcher){
+  if(!pitcher?.id) return {};
+  let out={
+    ERA: statFromSplits(pitcher,'ERA'),
+    WHIP: statFromSplits(pitcher,'WHIP'),
+    '勝投': statFromSplits(pitcher,'勝投'),
+    '敗投': statFromSplits(pitcher,'敗投')
+  };
+  if(Object.values(out).some(v=>v!==null && v!==undefined && v!=='')) return out;
+  const url=`https://statsapi.mlb.com/api/v1/people/${pitcher.id}/stats?stats=season&group=pitching`;
+  const data=await fetchJsonSafe(url);
+  const p={stats:data?.stats||[]};
+  return {
+    ERA: statFromSplits(p,'ERA'),
+    WHIP: statFromSplits(p,'WHIP'),
+    '勝投': statFromSplits(p,'勝投'),
+    '敗投': statFromSplits(p,'敗投')
+  };
+}
+async function enrichMLBGameFromStatsApi(game){
+  if(game.league!=='MLB' || game.sport!=='baseball') return game;
+  const aj=game.analysis_json||{};
+  const awayTrue=aj.true_away || game.home;
+  const homeTrue=aj.true_home || game.away;
+  const awayId=mlbTeamId(awayTrue);
+  const homeId=mlbTeamId(homeTrue);
+  if(!awayId || !homeId) { console.warn('MLB team id missing:', awayTrue, homeTrue); return game; }
+  const dates=[dateShiftISO(game.game_date,-1), game.game_date, dateShiftISO(game.game_date,1)];
+  let matched=null;
+  for(const d of dates){
+    const url=`https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${d}&hydrate=probablePitcher(stats(type=season,group=pitching)),team`;
+    const data=await fetchJsonSafe(url);
+    const games=(data?.dates||[]).flatMap(x=>x.games||[]);
+    matched=games.find(m=>{
+      const a=m.teams?.away?.team?.id, h=m.teams?.home?.team?.id;
+      return (a===awayId && h===homeId) || (a===homeId && h===awayId);
+    });
+    if(matched) break;
+  }
+  if(!matched) { console.warn('MLB schedule match missing:', game.game_date, awayTrue, homeTrue); return game; }
+  const awayPitcher=matched.teams?.away?.probablePitcher || null;
+  const homePitcher=matched.teams?.home?.probablePitcher || null;
+  const awayStats=await fetchPitcherSeasonStats(awayPitcher);
+  const homeStats=await fetchPitcherSeasonStats(homePitcher);
+  const byTeamId={};
+  if(matched.teams?.away?.team?.id) byTeamId[matched.teams.away.team.id]={pitcher:awayPitcher, stats:awayStats};
+  if(matched.teams?.home?.team?.id) byTeamId[matched.teams.home.team.id]={pitcher:homePitcher, stats:homeStats};
+  function statRows(teamName, existingName){
+    const id=mlbTeamId(teamName);
+    const item=byTeamId[id]||{};
+    const pitcherName=item.pitcher?.fullName || existingName || '先發待公布';
+    const st=item.stats||{};
+    return { pitcherName, rows:[
+      ['ERA', st.ERA ?? '待更新'],
+      ['WHIP', st.WHIP ?? '待更新'],
+      ['勝投', st['勝投'] ?? '待更新'],
+      ['敗投', st['敗投'] ?? '待更新'],
+      ['近況', pitcherName && pitcherName!=='先發待公布' ? '本季投手數據已更新' : '待更新']
+    ]};
+  }
+  if(Array.isArray(aj.starters)){
+    aj.starters=aj.starters.map(s=>{
+      const r=statRows(s.team, s.name);
+      return {...s, name:r.pitcherName, stats:r.rows};
+    });
+  }
+  aj.detail_status='mlb_stats_api';
+  aj.source_note=''; aj.data_sources=[];
+  game.analysis_json=aj;
+  return game;
+}
+async function enrichMLBGamesWithOfficialStats(games){
+  let count=0;
+  for(const g of games){
+    if(g.league==='MLB') { await enrichMLBGameFromStatsApi(g); count++; }
+  }
+  console.log(`MLB official stat enrichment attempted for ${count} games.`);
+  return games;
 }
 
 function strictSliceAround(text, key, radius = 220) {
@@ -575,7 +699,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v70-raw-data-center', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v71-raw-data-center', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 
@@ -589,7 +713,7 @@ async function writeRawSportsData(rows) {
     const run = await supabaseRequest('raw_sports_sync_runs', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([{ source: 'github_actions', version: 'v70-raw-data-center', status: 'success', total_games: rows.length, created_at: nowISO() }])
+      body: JSON.stringify([{ source: 'github_actions', version: 'v71-raw-data-center', status: 'success', total_games: rows.length, created_at: nowISO() }])
     });
     runId = Array.isArray(run) && run[0] ? run[0].id : null;
   } catch (e) { console.warn('raw_sports_sync_runs not written:', e.message); }
