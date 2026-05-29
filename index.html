@@ -295,7 +295,7 @@ body:not(.vip-user) #modalBody section.grid > div:nth-child(n+2)::after{
 @media (min-width:768px){.pitcher-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 
 
-/* v101 mobile compact header fix */
+/* v102 mobile compact header fix */
 @media (max-width: 640px){
   header.sticky{
     position: static !important;
@@ -2145,10 +2145,19 @@ function v33DateByMode(mode){
 }
 function v32Today(){ return v33DateByMode(v33DayMode); }
 function v68IsUSShiftLeague(){ return ['MLB','NBA','WNBA'].includes(state && state.league); }
-function v33ModeLabel(){ return '今日賽事'; }
-function v68DayButtonLabel(mode){ return '今日賽事'; }
-function v33RenderDaySwitch(){ const box=$('daySwitch'); if(box) box.innerHTML=''; }
-function setGameDayMode(mode){ v33DayMode='today'; renderLeagues(); renderGames(); renderHotPicks(); if(typeof v52LoadDailyGames==='function') v52LoadDailyGames(); }
+function v33ModeLabel(){ return (state && state.dayType==='tomorrow') ? '明日賽事' : '今日賽事'; }
+function v68DayButtonLabel(mode){ return mode==='tomorrow' ? '明日賽事' : '今日賽事'; }
+function v33RenderDaySwitch(){
+  if(typeof renderDaySwitch==='function') renderDaySwitch();
+}
+function setGameDayMode(mode){
+  state.dayType = (mode==='tomorrow') ? 'tomorrow' : 'today';
+  v33DayMode = state.dayType;
+  renderLeagues();
+  renderGames();
+  renderHotPicks();
+  if(typeof v52LoadDailyGames==='function') v52LoadDailyGames();
+}
 const v33OldRenderGames = renderGames;
 renderGames = function(){
   v33OldRenderGames();
@@ -3026,9 +3035,24 @@ async function v52LoadDailyGames(){
   if(!sbReady()) return;
   try{
     const statusFilter = '&game_status=eq.upcoming';
-    const rows=await sbFetch('daily_games',{
-      query:`?game_date=eq.${v53DailyGamesDate()}&game_day_type=eq.${v65GameDayType()}${statusFilter}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=180`
+    let usedDate = v53DailyGamesDate();
+    let rows=await sbFetch('daily_games',{
+      query:`?game_date=eq.${usedDate}&game_day_type=eq.${v65GameDayType()}${statusFilter}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=180`
     });
+    // v104: 凌晨 2 點前或 GitHub Actions 尚未跑完時，前台日期可能已跨日，但資料庫仍是上一批同步日。
+    // 若今天日期查不到，改抓該 dayType 最新一批 active 資料，避免前台顯示空白。
+    if(!rows || !rows.length){
+      const latest=await sbFetch('daily_games',{
+        query:`?game_day_type=eq.${v65GameDayType()}${statusFilter}&active=eq.true&select=game_date&order=game_date.desc&limit=1`
+      });
+      const latestDate=latest && latest[0] && latest[0].game_date;
+      if(latestDate){
+        usedDate = latestDate;
+        rows=await sbFetch('daily_games',{
+          query:`?game_date=eq.${usedDate}&game_day_type=eq.${v65GameDayType()}${statusFilter}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=180`
+        });
+      }
+    }
     if(!rows || !rows.length){
       // v54: 如果今日/明日同步抓不到，不要退回靜態示範賽事，避免前台誤以為有盤口。
       const keys=['MLB','NPB','CPBL','KBO','NBA','WNBA','CBA','足球','ECL','EPL','INT'];
