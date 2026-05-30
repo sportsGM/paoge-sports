@@ -1,1 +1,5 @@
-v134 - MLB/CPBL/NBA auto comments full count, other leagues 0-2, quick comment buttons retained
+v127-safe-paoge
+- 保留砲哥原本今日/明日同步流程與排程。
+- 修正每日 full 大同步判斷為 13 16。
+- 足球不開放讓分盤；棒球/籃球保留讓分。
+- 顯示所有 active 賽事；已開打/完賽不可送出預測。

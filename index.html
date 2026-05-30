@@ -3013,7 +3013,7 @@ function v52NormalizeDailyGame(r){
 async function v52LoadDailyGames(){
   if(!sbReady()) return;
   try{
-    const statusFilter = ''; // v126: 前台顯示當日所有 active 賽事，不再只看未開賽
+    const statusFilter = ''; // v127 safe: 顯示所有 active 賽事，不只 upcoming
     let usedDate = v53DailyGamesDate();
     let rows=await sbFetch('daily_games',{
       query:`?game_date=eq.${usedDate}&game_day_type=eq.${v65GameDayType()}${statusFilter}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=180`
@@ -3334,21 +3334,31 @@ submitHotPickModal = async function(){
 };
 </script>
 
+
 <script>
-/* ===== v124: football no spread recommendation / no football spread picks ===== */
+/* ===== v127 safe: football no spread + show active games safely ===== */
 (function(){
-  function isFootballGame(g){
+  function isFootballGameV127(g){
     return !!g && (g.sport === 'football' || /足球|soccer/i.test(String(g.league || '')));
   }
-  function isFootballSpreadText(v){
+  function isFootballSpreadTextV127(v){
     return /^(讓分|受讓)｜/.test(String(v || '').trim());
   }
-  function getPredictionGameByKey(key, market){
+  function isGamePredictableV127(g){
+    return !g || !g.game_status || g.game_status === 'upcoming';
+  }
+  function gameStatusTextV127(g){
+    if(!g || !g.game_status || g.game_status === 'upcoming') return '只限運彩盤口';
+    if(g.game_status === 'finished') return '已完賽';
+    if(g.game_status === 'live') return '比賽中';
+    return String(g.game_status);
+  }
+  function getPredictionGameByKeyV127(key, market){
     try{
       return (typeof allGamesFlat === 'function' ? allGamesFlat() : []).find(g => typeof predKey === 'function' && predKey(g, market || 'spread') === key);
     }catch(e){ return null; }
   }
-  function removeFootballSpreadCards(){
+  function removeFootballSpreadCardsV127(){
     try{
       if(!(state && state.sport === 'football')) return;
       document.querySelectorAll('#games article').forEach(article => {
@@ -3360,23 +3370,23 @@ submitHotPickModal = async function(){
         marketGrid.classList.remove('grid-cols-3');
         marketGrid.classList.add('grid-cols-2');
       });
-    }catch(e){ console.warn('v124 remove football spread cards failed', e); }
+    }catch(e){ console.warn('v127 remove football spread cards failed', e); }
   }
 
   if(typeof renderGames === 'function'){
     const oldRenderGames = renderGames;
     window.renderGames = function(){
       const out = oldRenderGames.apply(this, arguments);
-      removeFootballSpreadCards();
+      removeFootballSpreadCardsV127();
       return out;
     };
-    setTimeout(removeFootballSpreadCards, 0);
+    setTimeout(removeFootballSpreadCardsV127, 0);
   }
 
   if(typeof summaryCards === 'function'){
     const oldSummaryCards = summaryCards;
     window.summaryCards = function(g){
-      if(!isFootballGame(g)) return oldSummaryCards.apply(this, arguments);
+      if(!isFootballGameV127(g)) return oldSummaryCards.apply(this, arguments);
       const money = typeof shortFootballMarket === 'function' ? shortFootballMarket(g.money, 'money') : (g.money || '獨贏待確認');
       const total = typeof shortFootballMarket === 'function' ? shortFootballMarket(g.total, 'total') : (g.total || '大小待確認');
       return `<section class="grid lg:grid-cols-2 gap-4">${mainMarket('獨贏參考', money, g.conf && g.conf[0], '大眾參考方向', 'emerald')}${mainMarket('大小分', total, g.conf && g.conf[2], '方向參考率', 'pink')}</section>`;
@@ -3386,7 +3396,7 @@ submitHotPickModal = async function(){
   if(typeof searchIntelBlock === 'function'){
     const oldSearchIntelBlock = searchIntelBlock;
     window.searchIntelBlock = function(g){
-      if(!isFootballGame(g)) return oldSearchIntelBlock.apply(this, arguments);
+      if(!isFootballGameV127(g)) return oldSearchIntelBlock.apply(this, arguments);
       try{
         if(typeof v35IsVip === 'function' && !v35IsVip()){
           return `<section class="soft rounded-2xl p-4"><h3 class="section-title">AI 情蒐量表</h3><div class="permission-lock-msg">權限不足，請聯繫砲哥加入專屬會員群</div></section>`;
@@ -3405,15 +3415,6 @@ submitHotPickModal = async function(){
     };
   }
 
-  function isGamePredictable(g){
-    return !g || !g.game_status || g.game_status === 'upcoming';
-  }
-  function gameStatusText(g){
-    if(!g || !g.game_status || g.game_status === 'upcoming') return '只限運彩盤口';
-    if(g.game_status === 'finished') return '已完賽';
-    if(g.game_status === 'live') return '比賽中';
-    return String(g.game_status);
-  }
   window.renderPredictionCenter = function(){
     const preds = loadPreds();
     const all = allGamesFlat();
@@ -3426,22 +3427,22 @@ submitHotPickModal = async function(){
       const moneyChoices = [`${g.away} 獨贏`,`${g.home} 獨贏`];
       const spreadChoices = [spreadLine, oppositeSpread(g)];
       const totalChoices = [`大 ${totalLine}`,`小 ${totalLine}`];
-      const canPick = isGamePredictable(g);
-      const spreadBlock = isFootballGame(g) ? '' : renderMarketBlock(g,'spread','讓分',spreadLine,spreadChoices);
-      const pickBlocks = canPick ? `${renderMarketBlock(g,'moneyline','獨贏','選擇勝方',moneyChoices)}${spreadBlock}${renderMarketBlock(g,'total','大小分','大小 '+totalLine,totalChoices)}` : `<div class="pred-market"><div class="pred-market-head"><div class="pred-market-title">賽事已關閉預測</div><div class="pred-market-line clean">${gameStatusText(g)}</div></div><div class="pred-note">已開打或已完賽的賽事不能再送出預測。</div></div>`;
-      return `<article class="pred-card"><div class="pred-top"><div><div class="pred-game">${g.away} vs ${g.home}</div><div class="pred-line">${g.league}｜${sportLabel(g.sport)}</div></div><div class="pred-status">${gameStatusText(g)}</div></div>${pickBlocks}<div class="text-xs text-slate-500 font-black">每日賽後依賽果資料統計是否命中。</div></article>`;
+      const canPick = isGamePredictableV127(g);
+      const spreadBlock = isFootballGameV127(g) ? '' : renderMarketBlock(g,'spread','讓分',spreadLine,spreadChoices);
+      const pickBlocks = canPick ? `${renderMarketBlock(g,'moneyline','獨贏','選擇勝方',moneyChoices)}${spreadBlock}${renderMarketBlock(g,'total','大小分','大小 '+totalLine,totalChoices)}` : `<div class="pred-market"><div class="pred-market-head"><div class="pred-market-title">賽事已關閉預測</div><div class="pred-market-line clean">${gameStatusTextV127(g)}</div></div><div class="pred-note">已開打或已完賽的賽事不能再送出預測。</div></div>`;
+      return `<article class="pred-card"><div class="pred-top"><div><div class="pred-game">${g.away} vs ${g.home}</div><div class="pred-line">${g.league}｜${sportLabel(g.sport)}</div></div><div class="pred-status">${gameStatusTextV127(g)}</div></div>${pickBlocks}<div class="text-xs text-slate-500 font-black">每日賽後依賽果資料統計是否命中。</div></article>`;
     }).join('')}</div>`;
   };
 
   if(typeof savePrediction === 'function'){
     const oldSavePrediction = savePrediction;
     window.savePrediction = async function(key, choice, market){
-      const g = getPredictionGameByKey(key, market);
-      if(g && typeof isGamePredictable === 'function' && !isGamePredictable(g)){
+      const g = getPredictionGameByKeyV127(key, market);
+      if(g && !isGamePredictableV127(g)){
         alert('賽事已開打或已完賽，不能再送出預測。');
         return;
       }
-      if((market === 'spread' || /_spread$/.test(String(key))) && isFootballGame(g)){
+      if((market === 'spread' || /_spread$/.test(String(key))) && isFootballGameV127(g)){
         alert('足球賽事不開放讓分盤預測，請選擇獨贏或大小分。');
         return;
       }
@@ -3454,7 +3455,7 @@ submitHotPickModal = async function(){
     window.v33Choices = function(){
       const g = typeof v32CurrentGame === 'function' ? v32CurrentGame() : null;
       const choices = oldV33Choices.apply(this, arguments) || [];
-      return isFootballGame(g) ? choices.filter(c => !isFootballSpreadText(c.label) && !isFootballSpreadText(c.value)) : choices;
+      return isFootballGameV127(g) ? choices.filter(c => !isFootballSpreadTextV127(c.label) && !isFootballSpreadTextV127(c.value)) : choices;
     };
   }
   if(typeof v32MarketChoices === 'function'){
@@ -3462,14 +3463,14 @@ submitHotPickModal = async function(){
     window.v32MarketChoices = function(){
       const g = typeof v32CurrentGame === 'function' ? v32CurrentGame() : null;
       const choices = oldV32MarketChoices.apply(this, arguments) || [];
-      return isFootballGame(g) ? choices.filter(c => !isFootballSpreadText(c)) : choices;
+      return isFootballGameV127(g) ? choices.filter(c => !isFootballSpreadTextV127(c)) : choices;
     };
   }
   if(typeof submitHotPickModal === 'function'){
     const oldSubmitHotPickModal = submitHotPickModal;
     window.submitHotPickModal = async function(){
       const g = typeof v32CurrentGame === 'function' ? v32CurrentGame() : null;
-      if(isFootballGame(g) && isFootballSpreadText(v33HotPickSelected)){
+      if(isFootballGameV127(g) && isFootballSpreadTextV127(v33HotPickSelected)){
         const msg = $('hotPickModalMsg');
         if(msg){ msg.textContent='足球賽事不開放讓分盤熱推，請選擇獨贏或大小分。'; msg.classList.remove('hidden'); }
         else alert('足球賽事不開放讓分盤熱推，請選擇獨贏或大小分。');
@@ -3478,359 +3479,5 @@ submitHotPickModal = async function(){
       return oldSubmitHotPickModal.apply(this, arguments);
     };
   }
-})();
-</script>
-
-
-<script>
-/* ===== v133: MLB + CPBL auto member-topic rows, 111 IDs, no timestamps ===== */
-(function(){
-  function escHtml(v){
-    return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){
-      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
-    });
-  }
-  function hashText(str){
-    let h=2166136261;
-    String(str||'').split('').forEach(function(ch){ h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); });
-    return h >>> 0;
-  }
-  function taipeiParts(){
-    const parts=new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false}).formatToParts(new Date());
-    const o={};
-    parts.forEach(function(p){ o[p.type]=p.value; });
-    return {date:[o.year,o.month,o.day].join('-'), hour:Number(o.hour||0)};
-  }
-  function normalizeLeague(v){ return String(v||'').trim().toUpperCase(); }
-  function isAutoTopicGame(g){
-    const lg=normalizeLeague((g&&g.league) || (window.state&&state.league));
-    return !!lg;
-  }
-  function currentAutoTopicGame(){
-    try{ return typeof v32CurrentGame === 'function' ? v32CurrentGame() : ((games[state.league]||[])[currentGameIndex]); }
-    catch(e){ return null; }
-  }
-  function officialAutoTopics(g){
-    if(!isAutoTopicGame(g)) return [];
-    const t=taipeiParts();
-    if(t.hour < 3) return [];
-    const away=String(g.away||'客隊').trim();
-    const home=String(g.home||'主隊').trim();
-    const league=normalizeLeague((g&&g.league) || (window.state&&state.league));
-    const leagueName=league==='CPBL' ? '中華職棒' : (league==='NBA' ? 'NBA' : (league || '賽事'));
-    const total=String(g.total||'大小分').replace(/★/g,'').trim() || '大小分';
-    const money=String(g.money||'獨贏').replace(/★/g,'').trim() || '獨贏';
-    const seed=hashText([t.date,league,g.time,away,home,total,money].join('|'));
-    const names=[
-      '只想獨贏',
-      '轟單王',
-      '全壘打',
-      '滿貫砲',
-      '一棒帶走',
-      '安打就好',
-      '今天別搞',
-      '穩到莊家怕',
-      '半夜還在看盤',
-      '今晚加菜',
-      '不要冷門',
-      '夢到波膽',
-      '只玩有感覺',
-      '先發別搞',
-      '牛棚殺手',
-      '一日球迷',
-      'Faker',
-      '不要演',
-      '今晚吃大分',
-      '催落',
-      '結束才看球',
-      '先發撐住',
-      '黑哨逼逼逼',
-      '阿凱',
-      '小宇',
-      '明哥',
-      '龍哥',
-      '凱哥',
-      '小豪',
-      '阿哲',
-      '小林',
-      '阿峰',
-      '浩浩',
-      '小安',
-      '阿翔',
-      '小陳',
-      '阿宏',
-      '小偉',
-      '阿德',
-      '小志',
-      '阿賢',
-      '小郭',
-      '阿緯',
-      '小杰',
-      '阿倫',
-      '阿彬',
-      '小恩',
-      '阿軒',
-      '小皓',
-      '阿嘉',
-      '小睿',
-      '阿森',
-      '小飛',
-      '大谷一棒過',
-      'Curry三分',
-      'Kobe',
-      '喇叭詹',
-      '先卡再說',
-      '收工睡覺',
-      '夫人會生氣',
-      '新細明體',
-      '麻辣白開水',
-      '已經到公海了',
-      '開張六給他',
-      '要你命三千',
-      '慈母守中線',
-      '開封優格保七天',
-      '粉穗杏谷澤',
-      '穗稻忠武',
-      '陽明山下智久',
-      '永然叫共久桃',
-      '快刀斬破麻',
-      '高希音娜',
-      '穹道穗宮園',
-      '瓊道穗宮源',
-      '雷神',
-      '賽特之王',
-      'Zhen',
-      'Wu',
-      'shen',
-      'una',
-      'mimi',
-      'ray',
-      'graves',
-      'san',
-      'jason',
-      'hung',
-      'wei',
-      'nemo',
-      'doll',
-      'polly',
-      '比基尼大叔',
-      '山道猴王',
-      'Josh',
-      '掐掐',
-      '火雞味鍋巴',
-      '陳有昕',
-      '罵丸',
-      '黃二德',
-      '大勞爾先生',
-      '林沐雨',
-      '火球鼠鼠',
-      '兔寶寶o',
-      '波波奶茶',
-      '請君入甕',
-      '新手宇上路',
-      '水密頭罐桃',
-      '馬卡龍',
-      '樹懶',
-      '豆花',
-      '无情'
-    ];
-    const texts=[
-      '同路人出發',
-      '這場我下對面',
-      '感謝砲哥推',
-      '感謝龍女推',
-      '希望可以過',
-      '推推推推推',
-      '支持支持啊',
-      '加油加油啦',
-      '先卡位一下',
-      '轟啦轟啦轟',
-      '過過過過過',
-      '今天靠這場',
-      '先跟了再說',
-      '拜託穩住啊',
-      '這場有感覺',
-      '祝大家都過',
-      '一起轟起來',
-      '支持一下啦',
-      '推起來推起',
-      '這場可以跟'
-    ];
-    const isMainAutoTopicLeague=(league==='MLB' || league==='CPBL' || league==='NBA');
-    const baseCount=1+(seed%4);
-    const count=isMainAutoTopicLeague ? (baseCount + (t.hour>=11 ? 2 : 0)) : (seed%3);
-    const tags=['朕天下會員｜','8BET會員｜'];
-    const rows=[];
-    for(let i=0;i<count;i++){
-      rows.push({ name:names[(seed+i*3)%names.length], tag:tags[(seed+i)%tags.length], body:texts[(seed+i*5)%texts.length] });
-    }
-    return rows;
-  }
-  function renderOfficialRows(rows){
-    return rows.map(function(r){
-      return `<article class="comment-card"><div class="top"><div class="name">${escHtml(r.tag)}${escHtml(r.name)}</div><div class="tag">熱度討論</div></div><div class="body">${escHtml(r.body)}</div></article>`;
-    }).join('');
-  }
-  function renderPlayerRows(rows){
-    return (rows||[]).map(function(r){
-      return `<article class="comment-card"><div class="top"><div class="name">${escHtml(r.nickname||'匿名')}</div><div class="tag">玩家留言</div></div><div class="body">${escHtml(r.content||'')}</div></article>`;
-    }).join('');
-  }
-  function renderPunditRows(rows){
-    return (rows||[]).map(function(r,idx){
-      return `<article class="comment-card"><div class="top"><div class="name">🔥 ${escHtml(r.nickname||'匿名')}</div><div class="acc-pill">準確率 ${escHtml(r.acc)}%</div></div><div class="pick">${escHtml(r.market_pick||'未選盤口')}</div><div class="body">${escHtml(r.content||'')}</div><div class="tag" style="margin-top:8px">排序第 ${idx+1}</div></article>`;
-    }).join('');
-  }
-
-  window.v32LoadPlayerComments = async function(){
-    const box=document.getElementById('dbPlayerComments');
-    if(!box) return;
-    const g=currentAutoTopicGame();
-    const autoRows=officialAutoTopics(g);
-    const rows=typeof v32FetchComments==='function' ? await v32FetchComments('player') : [];
-    if(!autoRows.length && !(rows||[]).length){
-      box.innerHTML='<div class="comment-empty">目前還沒有玩家留言，有人留言後才會出現。</div>';
-      return;
-    }
-    box.innerHTML = renderOfficialRows(autoRows) + renderPlayerRows(rows||[]);
-  };
-
-  window.v32LoadPunditComments = async function(){
-    const box=document.getElementById('dbPunditComments');
-    if(!box) return;
-    const [rows,userMap]=await Promise.all([typeof v32FetchComments==='function' ? v32FetchComments('pundit') : [], typeof v32UsersMap==='function' ? v32UsersMap() : {}]);
-    let enriched=(rows||[]).map(function(r){
-      const u=userMap[r.account]||{};
-      return Object.assign({}, r, {acc:typeof v32Accuracy==='function' ? v32Accuracy(u) : 0, role:u.role||''});
-    });
-    enriched.sort(function(a,b){
-      if(typeof punditSort !== 'undefined' && punditSort==='accuracy') return (Number(b.acc)||0)-(Number(a.acc)||0);
-      return new Date(b.created_at)-new Date(a.created_at);
-    });
-    if(!enriched.length){
-      box.innerHTML='<div class="comment-empty">目前還沒有VIP好手熱推，等VIP會員留言後才會出現。</div>';
-      return;
-    }
-    box.innerHTML=renderPunditRows(enriched);
-  };
-})();
-</script>
-
-
-<script>
-/* ===== v133: player comment quick buttons (fill only, not auto-send) ===== */
-(function(){
-  const QUICK_COMMENTS=['同路人出發','這場我下對面','感謝砲哥推','感謝龍女推','希望可以過'];
-
-  function ensurePlayerQuickModal(){
-    if(document.getElementById('playerQuickCommentModal')) return;
-    const style=document.createElement('style');
-    style.textContent=`
-      .quick-comment-options{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-      .quick-comment-btn{border:1px solid rgba(52,211,153,.25);background:rgba(16,185,129,.10);color:#d1fae5;border-radius:999px;padding:8px 12px;font-size:.85rem;font-weight:950;transition:.15s}
-      .quick-comment-btn:hover{background:rgba(16,185,129,.20);transform:translateY(-1px)}
-    `;
-    document.head.appendChild(style);
-
-    const modal=document.createElement('div');
-    modal.id='playerQuickCommentModal';
-    modal.className='hidden fixed inset-0 z-[75] bg-black/75 backdrop-blur-sm p-4 flex items-center justify-center';
-    modal.innerHTML=`
-      <div class="card rounded-3xl p-5 max-w-xl w-full max-h-[92vh] overflow-y-auto">
-        <div class="flex justify-between items-center mb-4">
-          <div>
-            <h3 class="text-xl font-black text-emerald-300">發佈玩家留言</h3>
-            <p id="playerQuickGameTitle" class="text-xs text-slate-500 font-black mt-1">點快捷留言可自動帶入，也可以自己修改</p>
-          </div>
-          <button onclick="closePlayerQuickCommentModal()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
-        </div>
-        <div class="hot-modal-grid">
-          <div>
-            <div class="hot-market-title">快捷留言</div>
-            <div id="playerQuickOptions" class="quick-comment-options"></div>
-          </div>
-          <div>
-            <div class="hot-market-title">留言內容</div>
-            <textarea id="playerQuickText" class="hot-textarea" placeholder="請輸入至少 5 個字"></textarea>
-          </div>
-          <div id="playerQuickMsg" class="text-sm font-black text-pink-300 hidden"></div>
-          <div class="hot-modal-actions">
-            <button class="hot-cancel" onclick="closePlayerQuickCommentModal()">取消</button>
-            <button class="hot-submit" onclick="submitPlayerQuickComment()">送出留言</button>
-          </div>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
-  }
-
-  function quickEsc(s){
-    return String(s||'').replace(/[&<>'"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c];});
-  }
-
-  window.fillPlayerQuickComment=function(text){
-    const input=document.getElementById('playerQuickText');
-    if(input){ input.value=text; input.focus(); }
-  };
-
-  window.closePlayerQuickCommentModal=function(){
-    const modal=document.getElementById('playerQuickCommentModal');
-    if(modal) modal.classList.add('hidden');
-  };
-
-  window.openPlayerQuickCommentModal=function(){
-    ensurePlayerQuickModal();
-    const g=(typeof v32CurrentGame==='function') ? v32CurrentGame() : null;
-    const title=document.getElementById('playerQuickGameTitle');
-    if(title && g) title.textContent=`${g.away||'客隊'} vs ${g.home||'主隊'}｜點快捷留言可自動帶入，也可以自己修改`;
-    const options=document.getElementById('playerQuickOptions');
-    if(options){
-      options.innerHTML=QUICK_COMMENTS.map(t=>`<button type="button" class="quick-comment-btn" onclick="fillPlayerQuickComment('${quickEsc(t)}')">${quickEsc(t)}</button>`).join('');
-    }
-    const text=document.getElementById('playerQuickText');
-    const msg=document.getElementById('playerQuickMsg');
-    if(text) text.value='';
-    if(msg) msg.classList.add('hidden');
-    document.getElementById('playerQuickCommentModal').classList.remove('hidden');
-  };
-
-  window.submitPlayerQuickComment=async function(){
-    const me=typeof getCurrentUser==='function' ? getCurrentUser() : null;
-    const msg=document.getElementById('playerQuickMsg');
-    const text=(document.getElementById('playerQuickText')?.value||'').trim();
-    if(!me){ alert('請先登入後再留言'); if(typeof openAuthModal==='function') openAuthModal('login'); return; }
-    if(text.length<5){ if(msg){ msg.textContent='留言至少 5 個字'; msg.classList.remove('hidden'); } return; }
-    try{
-      await sbFetch('comments',{method:'POST',headers:{Prefer:'return=minimal'},body:{
-        game_key:typeof v32CurrentGameKey==='function' ? v32CurrentGameKey() : '',
-        account:me.account,
-        nickname:me.nickname,
-        content:text,
-        market_pick:'',
-        comment_type:'player',
-        match_date:(typeof v33DateByMode==='function' && typeof v33DayMode!=='undefined') ? v33DateByMode(v33DayMode) : (typeof v32Today==='function' ? v32Today() : new Date().toISOString().slice(0,10)),
-        created_at:new Date().toISOString()
-      }});
-      closePlayerQuickCommentModal();
-      alert('留言成功');
-      if(typeof v32LoadPlayerComments==='function') v32LoadPlayerComments();
-    }catch(e){
-      if(msg){ msg.textContent='留言失敗：'+(e&&e.message?e.message:e); msg.classList.remove('hidden'); }
-      else alert('留言失敗：'+(e&&e.message?e.message:e));
-    }
-  };
-
-  window.openCommentComposer=function(board){
-    const me=typeof getCurrentUser==='function' ? getCurrentUser() : null;
-    if(!me){ alert('請先登入後再留言'); if(typeof openAuthModal==='function') openAuthModal('login'); return; }
-    if(typeof v35IsRookie==='function' && v35IsRookie()){
-      if(typeof v35PaogeMsg==='function') v35PaogeMsg(); else alert('請先升級會員後再留言');
-      return;
-    }
-    if(String(board||'').includes('好手')){
-      if(typeof openHotPickModal==='function') openHotPickModal();
-      return;
-    }
-    openPlayerQuickCommentModal();
-  };
 })();
 </script>
