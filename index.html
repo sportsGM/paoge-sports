@@ -2989,7 +2989,7 @@ function v52TodayTW(offsetDays=0){
     return d.toISOString().slice(0,10);
   }
 }
-function v53DailyGamesDate(){ return v52TodayTW(0); }
+function v53DailyGamesDate(){ return v52TodayTW(v65GameDayType()==='tomorrow' ? 1 : 0); }
 
 function v65GameDayType(){ return state.dayType || 'today'; }
 function v52NormalizeDailyGame(r){
@@ -3013,7 +3013,7 @@ function v52NormalizeDailyGame(r){
 async function v52LoadDailyGames(){
   if(!sbReady()) return;
   try{
-    const statusFilter = ''; // v127 safe: 顯示所有 active 賽事，不只 upcoming
+    const statusFilter = ''; // v128 safe: 顯示所有 active 賽事；今日查今天，明日查明天
     let usedDate = v53DailyGamesDate();
     let rows=await sbFetch('daily_games',{
       query:`?game_date=eq.${usedDate}&game_day_type=eq.${v65GameDayType()}${statusFilter}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=180`
