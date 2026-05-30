@@ -5,7 +5,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:
       sync_mode:
@@ -16,6 +16,9 @@ on:
         options:
           - incremental
           - full
+          
+permissions:
+  contents: write
 
 jobs:
   sync:
