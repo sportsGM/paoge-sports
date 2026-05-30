@@ -1,4 +1,4 @@
-name: Sports sync v114 footballTeamNote fix
+name: Sports sync v115 event-date odds refresh
 
 on:
   schedule:
