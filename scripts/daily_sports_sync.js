@@ -329,7 +329,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v117-hourly-new-games-odds-refresh', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      parser_version: 'v119-keep-finished-cpbl-battle-info', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
       display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'), market_open: marketOpen,
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -463,9 +463,10 @@ async function scrapePlaySportWithBrowser(options = {}) {
           const totalGroups = groups.length;
           // v108：今日頁所有球類都會移除『已結束且沒有投注選項』的場次；仍可下注、有白色圓點的場次會保留。
           // 未開盤但尚未開賽的場次不會因為沒有圓點就被刪除，會照規則顯示『未開盤』。
-          const shouldSkipFinished = displayDay === 'today';
-          if (shouldSkipFinished) groups = groups.filter(g => !g.finished);
-          let parsed = 0, rejectedFinished = totalGroups - groups.length;
+          // v119：今日賽事就算已開打/已完賽也要保留到當天結束。
+          // 00:10 大同步時如果來源頁已經找不到該場，才會由 markMissingInactive 移除。
+          const finishedDetected = groups.filter(g => g.finished).length;
+          let parsed = 0, rejectedFinished = 0;
           for (const group of groups) {
             group.rawDayType = displayDay;
             group.dayType = displayDay;
@@ -479,7 +480,7 @@ async function scrapePlaySportWithBrowser(options = {}) {
               parsed++;
             }
           }
-          console.log(`${displayDay} ${target.label}: source=${displayDay}, groups=${totalGroups}, finished_skipped=${rejectedFinished}, parsed=${parsed}, game_date=${syncDate}`);
+          console.log(`${displayDay} ${target.label}: source=${displayDay}, groups=${totalGroups}, finished_detected_kept=${finishedDetected}, parsed=${parsed}, game_date=${syncDate}`);
         } catch(e) { console.warn(`${displayDay} ${target.label} scrape failed: ${e.message}`); }
         finally { await page.close().catch(()=>{}); }
       }
@@ -522,6 +523,8 @@ async function fetchDetailTextsForGame(context, game, searchRows=[]){
   const urls=[];
   for(const r of searchRows){ if(r.link && isUsefulDetailUrl(r.link)) urls.push(r.link); }
   const aj=game.analysis_json||{};
+  // v119：CPBL / NPB / KBO 都從該賽事列左側「對戰資訊」連結抓資料。
+  // battle_url 來自同一個賽事 group，已先由賽事列的雙方隊伍解析確認，避免抓到其他場。
   if(aj.battle_url) urls.push(aj.battle_url);
   for(const t of (aj.team_urls||[])){ if(t.url) urls.push(t.url); }
   const seen=new Set();
@@ -1096,7 +1099,7 @@ function applyCPBLOfficialText(game, boardText){
   }
   if(changed){
     aj.detail_status='cpbl_official_enriched';
-    aj.h2h = aj.h2h || [['近期對戰',[away,'-'],[home,'-'],'CPBL 官方戰績頁已補入本季/近期資訊，對戰細項依賽前頁更新']];
+    // CPBL 若沒有真正對戰紀錄，不硬塞假歷史對戰；前台會自動隱藏。
     aj.source_note=''; aj.data_sources=[];
     game.analysis_json=aj;
   }
@@ -1478,7 +1481,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v113-mlb-safe-pitchers-football-variation', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v119-keep-finished-cpbl-battle-info', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 
@@ -1516,7 +1519,7 @@ async function writeRawSportsData(rows) {
     const run = await supabaseRequest('raw_sports_sync_runs', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([{ source: 'github_actions', version: 'v117-hourly-new-games-odds-refresh', status: 'success', total_games: rows.length, created_at: nowISO() }])
+      body: JSON.stringify([{ source: 'github_actions', version: 'v119-hourly-new-games-odds-refresh', status: 'success', total_games: rows.length, created_at: nowISO() }])
     });
     runId = Array.isArray(run) && run[0] ? run[0].id : null;
   } catch (e) { console.warn('raw_sports_sync_runs not written:', e.message); }
@@ -1550,7 +1553,7 @@ async function writeRawSportsData(rows) {
 }
 
 async function loadPromotedTomorrowRows() {
-  // v117：不再用另外搬資料的方式處理跨日；改用 event identity 合併。
+  // v119：不再用另外搬資料的方式處理跨日；改用 event identity 合併。
   return [];
 }
 
@@ -1558,7 +1561,7 @@ function withAnalysisMeta(row, extra = {}) {
   const aj = row.analysis_json && typeof row.analysis_json === 'object' ? row.analysis_json : {};
   row.analysis_json = {
     ...aj,
-    parser_version: 'v117-hourly-new-games-odds-refresh',
+    parser_version: 'v119-keep-finished-cpbl-battle-info',
     event_date: row.game_date,
     display_pool: row.game_day_type,
     source_day: row.raw_data?.raw_day_type || aj.source_day || row.game_day_type,
@@ -1569,7 +1572,7 @@ function withAnalysisMeta(row, extra = {}) {
 }
 
 function dedupeGames(rows) {
-  // v117：同一場比賽不以今日/明日作為唯一判斷，避免 12 點後明日賽事移到今日時重複。
+  // v119：同一場比賽不以今日/明日作為唯一判斷，避免 12 點後明日賽事移到今日時重複。
   const seen = new Set();
   const out = [];
   for (const row of rows) {
@@ -1831,19 +1834,19 @@ async function mergeDailyGames(rows, { markMissingInactive = false, modeLabel = 
     }
   }
 
-  const msg = `v117 ${modeLabel}: inserted=${inserted}, patched=${patched}, same_odds=${skipped}, market_opened=${marketOpened}, odds_changed=${oddsChanged}, pending_kept=${pendingKept}, display_moved=${displayMoved}, inactive=${inactive}, incoming=${incoming.length}`;
+  const msg = `v119 ${modeLabel}: inserted=${inserted}, patched=${patched}, same_odds=${skipped}, market_opened=${marketOpened}, odds_changed=${oddsChanged}, pending_kept=${pendingKept}, display_moved=${displayMoved}, inactive=${inactive}, incoming=${incoming.length}`;
   console.log(msg);
   await writeSyncStatus('success', msg, incoming.length);
 }
 async function incrementalDailyGames(rows) {
-  // v117：每小時重新掃描玩運彩，不只補刷舊賽事，也會新增 00:10 後才上架的新賽事。
+  // v119：每小時重新掃描玩運彩，不只補刷舊賽事，也會新增 00:10 後才上架的新賽事。
   // A. 新場次：直接新增；若已有盤口就用目前盤口產生分析，未開盤則先標記待確認。
   // B. 舊場次：盤口一樣不重寫；盤口開出或變動才重新分析。
   // C. 已分析過的場次不會被空盤口/未開賽覆蓋。
   return mergeDailyGames(rows, { markMissingInactive: false, modeLabel: 'incremental' });
 }
 async function upsertDailyGames(rows) {
-  // v117：大同步不整批刪除重寫，避免明日賽事 00:10 移到今日時重複分析。
+  // v119：大同步不整批刪除重寫，避免明日賽事 00:10 移到今日時重複分析。
   // 只用 event_date + league + home + away 判斷同一場；盤口不變就保留舊分析。
   return mergeDailyGames(rows, { markMissingInactive: true, modeLabel: 'full' });
 }
@@ -1855,7 +1858,7 @@ async function main() {
   const incremental = SYNC_MODE === 'incremental';
   const scraped = await scrapePlaySportWithBrowser({ skipEnrichment: incremental });
   const games = [...promoted, ...scraped];
-  console.log(`Parsed valid games v117 hourly-new-games display-pool: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
+  console.log(`Parsed valid games v119 hourly-new-games display-pool: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   if (incremental) {
     await incrementalDailyGames(games);
