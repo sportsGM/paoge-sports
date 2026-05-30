@@ -2,7 +2,6 @@ name: Sports sync v120 duplicate-safe keep finished
 
 on:
   schedule:
-    - cron: "10 * * * *"
   workflow_dispatch:
     inputs:
       sync_mode:
