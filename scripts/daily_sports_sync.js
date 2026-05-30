@@ -329,7 +329,7 @@ function convertGroupToGame(group, target, sourceUrl) {
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
     source_url: sourceUrl, source_name: '資料中心', active: true, updated_at: nowISO(),
     analysis_json: {
-      parser_version: 'v115-event-date-odds-refresh', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
+      parser_version: 'v117-hourly-new-games-odds-refresh', true_away: awayTeam, true_home: homeTeam, battle_url: firstLinkByText(group,/對戰資訊|battle/), team_urls: teamLinksFromGroup(group),
       display_order: 'home_first', competition, sport_label: target.label, market_day_label: displayDayLabelForLeague(target.league, group.dayType || 'today'), market_open: marketOpen,
       starters, core_players: corePlayers,
       metrics: defaultMetrics(awayTeam, homeTeam, target.sport),
@@ -1516,7 +1516,7 @@ async function writeRawSportsData(rows) {
     const run = await supabaseRequest('raw_sports_sync_runs', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify([{ source: 'github_actions', version: 'v115-event-date-odds-refresh', status: 'success', total_games: rows.length, created_at: nowISO() }])
+      body: JSON.stringify([{ source: 'github_actions', version: 'v117-hourly-new-games-odds-refresh', status: 'success', total_games: rows.length, created_at: nowISO() }])
     });
     runId = Array.isArray(run) && run[0] ? run[0].id : null;
   } catch (e) { console.warn('raw_sports_sync_runs not written:', e.message); }
@@ -1549,9 +1549,8 @@ async function writeRawSportsData(rows) {
   } catch (e) { console.warn('normalize_raw_sports_games_v70_optional skipped:', e.message); }
 }
 
-async 
-function loadPromotedTomorrowRows() {
-  // v115：不再用另外搬資料的方式處理跨日；改用 event identity 合併。
+async function loadPromotedTomorrowRows() {
+  // v117：不再用另外搬資料的方式處理跨日；改用 event identity 合併。
   return [];
 }
 
@@ -1559,7 +1558,7 @@ function withAnalysisMeta(row, extra = {}) {
   const aj = row.analysis_json && typeof row.analysis_json === 'object' ? row.analysis_json : {};
   row.analysis_json = {
     ...aj,
-    parser_version: 'v115-event-date-odds-refresh',
+    parser_version: 'v117-hourly-new-games-odds-refresh',
     event_date: row.game_date,
     display_pool: row.game_day_type,
     source_day: row.raw_data?.raw_day_type || aj.source_day || row.game_day_type,
@@ -1570,7 +1569,7 @@ function withAnalysisMeta(row, extra = {}) {
 }
 
 function dedupeGames(rows) {
-  // v115：同一場比賽不以今日/明日作為唯一判斷，避免 12 點後明日賽事移到今日時重複。
+  // v117：同一場比賽不以今日/明日作為唯一判斷，避免 12 點後明日賽事移到今日時重複。
   const seen = new Set();
   const out = [];
   for (const row of rows) {
@@ -1832,17 +1831,19 @@ async function mergeDailyGames(rows, { markMissingInactive = false, modeLabel = 
     }
   }
 
-  const msg = `v115 ${modeLabel}: inserted=${inserted}, patched=${patched}, same_odds=${skipped}, market_opened=${marketOpened}, odds_changed=${oddsChanged}, pending_kept=${pendingKept}, display_moved=${displayMoved}, inactive=${inactive}, incoming=${incoming.length}`;
+  const msg = `v117 ${modeLabel}: inserted=${inserted}, patched=${patched}, same_odds=${skipped}, market_opened=${marketOpened}, odds_changed=${oddsChanged}, pending_kept=${pendingKept}, display_moved=${displayMoved}, inactive=${inactive}, incoming=${incoming.length}`;
   console.log(msg);
   await writeSyncStatus('success', msg, incoming.length);
 }
 async function incrementalDailyGames(rows) {
-  // v115：每小時只補刷盤口。
-  // 未開盤不分析；已分析過不會被未開盤覆蓋；盤口開出或變動才更新分析。
+  // v117：每小時重新掃描玩運彩，不只補刷舊賽事，也會新增 00:10 後才上架的新賽事。
+  // A. 新場次：直接新增；若已有盤口就用目前盤口產生分析，未開盤則先標記待確認。
+  // B. 舊場次：盤口一樣不重寫；盤口開出或變動才重新分析。
+  // C. 已分析過的場次不會被空盤口/未開賽覆蓋。
   return mergeDailyGames(rows, { markMissingInactive: false, modeLabel: 'incremental' });
 }
 async function upsertDailyGames(rows) {
-  // v115：大同步不整批刪除重寫，避免明日賽事 00:10 移到今日時重複分析。
+  // v117：大同步不整批刪除重寫，避免明日賽事 00:10 移到今日時重複分析。
   // 只用 event_date + league + home + away 判斷同一場；盤口不變就保留舊分析。
   return mergeDailyGames(rows, { markMissingInactive: true, modeLabel: 'full' });
 }
@@ -1854,7 +1855,7 @@ async function main() {
   const incremental = SYNC_MODE === 'incremental';
   const scraped = await scrapePlaySportWithBrowser({ skipEnrichment: incremental });
   const games = [...promoted, ...scraped];
-  console.log(`Parsed valid games v115 event-date display-pool: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
+  console.log(`Parsed valid games v117 hourly-new-games display-pool: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   if (incremental) {
     await incrementalDailyGames(games);

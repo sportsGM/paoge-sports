@@ -1,1 +1,1 @@
-v115 event_date odds refresh + marquee
+v117-hourly-new-games-odds-refresh
