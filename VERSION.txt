@@ -1,4 +1,1 @@
-v126
-- 修正 GitHub Actions 每日 full 大同步判斷 13 16。
-- 前台顯示當日所有 active 賽事，不再只顯示 upcoming。
-- 賽事預測只允許未開賽賽事送出；足球仍不開放讓分盤。
+v134 - MLB/CPBL/NBA auto comments full count, other leagues 0-2, quick comment buttons retained

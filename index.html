@@ -3480,3 +3480,357 @@ submitHotPickModal = async function(){
   }
 })();
 </script>
+
+
+<script>
+/* ===== v133: MLB + CPBL auto member-topic rows, 111 IDs, no timestamps ===== */
+(function(){
+  function escHtml(v){
+    return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function hashText(str){
+    let h=2166136261;
+    String(str||'').split('').forEach(function(ch){ h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); });
+    return h >>> 0;
+  }
+  function taipeiParts(){
+    const parts=new Intl.DateTimeFormat('zh-TW',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',hour12:false}).formatToParts(new Date());
+    const o={};
+    parts.forEach(function(p){ o[p.type]=p.value; });
+    return {date:[o.year,o.month,o.day].join('-'), hour:Number(o.hour||0)};
+  }
+  function normalizeLeague(v){ return String(v||'').trim().toUpperCase(); }
+  function isAutoTopicGame(g){
+    const lg=normalizeLeague((g&&g.league) || (window.state&&state.league));
+    return !!lg;
+  }
+  function currentAutoTopicGame(){
+    try{ return typeof v32CurrentGame === 'function' ? v32CurrentGame() : ((games[state.league]||[])[currentGameIndex]); }
+    catch(e){ return null; }
+  }
+  function officialAutoTopics(g){
+    if(!isAutoTopicGame(g)) return [];
+    const t=taipeiParts();
+    if(t.hour < 3) return [];
+    const away=String(g.away||'客隊').trim();
+    const home=String(g.home||'主隊').trim();
+    const league=normalizeLeague((g&&g.league) || (window.state&&state.league));
+    const leagueName=league==='CPBL' ? '中華職棒' : (league==='NBA' ? 'NBA' : (league || '賽事'));
+    const total=String(g.total||'大小分').replace(/★/g,'').trim() || '大小分';
+    const money=String(g.money||'獨贏').replace(/★/g,'').trim() || '獨贏';
+    const seed=hashText([t.date,league,g.time,away,home,total,money].join('|'));
+    const names=[
+      '只想獨贏',
+      '轟單王',
+      '全壘打',
+      '滿貫砲',
+      '一棒帶走',
+      '安打就好',
+      '今天別搞',
+      '穩到莊家怕',
+      '半夜還在看盤',
+      '今晚加菜',
+      '不要冷門',
+      '夢到波膽',
+      '只玩有感覺',
+      '先發別搞',
+      '牛棚殺手',
+      '一日球迷',
+      'Faker',
+      '不要演',
+      '今晚吃大分',
+      '催落',
+      '結束才看球',
+      '先發撐住',
+      '黑哨逼逼逼',
+      '阿凱',
+      '小宇',
+      '明哥',
+      '龍哥',
+      '凱哥',
+      '小豪',
+      '阿哲',
+      '小林',
+      '阿峰',
+      '浩浩',
+      '小安',
+      '阿翔',
+      '小陳',
+      '阿宏',
+      '小偉',
+      '阿德',
+      '小志',
+      '阿賢',
+      '小郭',
+      '阿緯',
+      '小杰',
+      '阿倫',
+      '阿彬',
+      '小恩',
+      '阿軒',
+      '小皓',
+      '阿嘉',
+      '小睿',
+      '阿森',
+      '小飛',
+      '大谷一棒過',
+      'Curry三分',
+      'Kobe',
+      '喇叭詹',
+      '先卡再說',
+      '收工睡覺',
+      '夫人會生氣',
+      '新細明體',
+      '麻辣白開水',
+      '已經到公海了',
+      '開張六給他',
+      '要你命三千',
+      '慈母守中線',
+      '開封優格保七天',
+      '粉穗杏谷澤',
+      '穗稻忠武',
+      '陽明山下智久',
+      '永然叫共久桃',
+      '快刀斬破麻',
+      '高希音娜',
+      '穹道穗宮園',
+      '瓊道穗宮源',
+      '雷神',
+      '賽特之王',
+      'Zhen',
+      'Wu',
+      'shen',
+      'una',
+      'mimi',
+      'ray',
+      'graves',
+      'san',
+      'jason',
+      'hung',
+      'wei',
+      'nemo',
+      'doll',
+      'polly',
+      '比基尼大叔',
+      '山道猴王',
+      'Josh',
+      '掐掐',
+      '火雞味鍋巴',
+      '陳有昕',
+      '罵丸',
+      '黃二德',
+      '大勞爾先生',
+      '林沐雨',
+      '火球鼠鼠',
+      '兔寶寶o',
+      '波波奶茶',
+      '請君入甕',
+      '新手宇上路',
+      '水密頭罐桃',
+      '馬卡龍',
+      '樹懶',
+      '豆花',
+      '无情'
+    ];
+    const texts=[
+      '同路人出發',
+      '這場我下對面',
+      '感謝砲哥推',
+      '感謝龍女推',
+      '希望可以過',
+      '推推推推推',
+      '支持支持啊',
+      '加油加油啦',
+      '先卡位一下',
+      '轟啦轟啦轟',
+      '過過過過過',
+      '今天靠這場',
+      '先跟了再說',
+      '拜託穩住啊',
+      '這場有感覺',
+      '祝大家都過',
+      '一起轟起來',
+      '支持一下啦',
+      '推起來推起',
+      '這場可以跟'
+    ];
+    const isMainAutoTopicLeague=(league==='MLB' || league==='CPBL' || league==='NBA');
+    const baseCount=1+(seed%4);
+    const count=isMainAutoTopicLeague ? (baseCount + (t.hour>=11 ? 2 : 0)) : (seed%3);
+    const tags=['朕天下會員｜','8BET會員｜'];
+    const rows=[];
+    for(let i=0;i<count;i++){
+      rows.push({ name:names[(seed+i*3)%names.length], tag:tags[(seed+i)%tags.length], body:texts[(seed+i*5)%texts.length] });
+    }
+    return rows;
+  }
+  function renderOfficialRows(rows){
+    return rows.map(function(r){
+      return `<article class="comment-card"><div class="top"><div class="name">${escHtml(r.tag)}${escHtml(r.name)}</div><div class="tag">熱度討論</div></div><div class="body">${escHtml(r.body)}</div></article>`;
+    }).join('');
+  }
+  function renderPlayerRows(rows){
+    return (rows||[]).map(function(r){
+      return `<article class="comment-card"><div class="top"><div class="name">${escHtml(r.nickname||'匿名')}</div><div class="tag">玩家留言</div></div><div class="body">${escHtml(r.content||'')}</div></article>`;
+    }).join('');
+  }
+  function renderPunditRows(rows){
+    return (rows||[]).map(function(r,idx){
+      return `<article class="comment-card"><div class="top"><div class="name">🔥 ${escHtml(r.nickname||'匿名')}</div><div class="acc-pill">準確率 ${escHtml(r.acc)}%</div></div><div class="pick">${escHtml(r.market_pick||'未選盤口')}</div><div class="body">${escHtml(r.content||'')}</div><div class="tag" style="margin-top:8px">排序第 ${idx+1}</div></article>`;
+    }).join('');
+  }
+
+  window.v32LoadPlayerComments = async function(){
+    const box=document.getElementById('dbPlayerComments');
+    if(!box) return;
+    const g=currentAutoTopicGame();
+    const autoRows=officialAutoTopics(g);
+    const rows=typeof v32FetchComments==='function' ? await v32FetchComments('player') : [];
+    if(!autoRows.length && !(rows||[]).length){
+      box.innerHTML='<div class="comment-empty">目前還沒有玩家留言，有人留言後才會出現。</div>';
+      return;
+    }
+    box.innerHTML = renderOfficialRows(autoRows) + renderPlayerRows(rows||[]);
+  };
+
+  window.v32LoadPunditComments = async function(){
+    const box=document.getElementById('dbPunditComments');
+    if(!box) return;
+    const [rows,userMap]=await Promise.all([typeof v32FetchComments==='function' ? v32FetchComments('pundit') : [], typeof v32UsersMap==='function' ? v32UsersMap() : {}]);
+    let enriched=(rows||[]).map(function(r){
+      const u=userMap[r.account]||{};
+      return Object.assign({}, r, {acc:typeof v32Accuracy==='function' ? v32Accuracy(u) : 0, role:u.role||''});
+    });
+    enriched.sort(function(a,b){
+      if(typeof punditSort !== 'undefined' && punditSort==='accuracy') return (Number(b.acc)||0)-(Number(a.acc)||0);
+      return new Date(b.created_at)-new Date(a.created_at);
+    });
+    if(!enriched.length){
+      box.innerHTML='<div class="comment-empty">目前還沒有VIP好手熱推，等VIP會員留言後才會出現。</div>';
+      return;
+    }
+    box.innerHTML=renderPunditRows(enriched);
+  };
+})();
+</script>
+
+
+<script>
+/* ===== v133: player comment quick buttons (fill only, not auto-send) ===== */
+(function(){
+  const QUICK_COMMENTS=['同路人出發','這場我下對面','感謝砲哥推','感謝龍女推','希望可以過'];
+
+  function ensurePlayerQuickModal(){
+    if(document.getElementById('playerQuickCommentModal')) return;
+    const style=document.createElement('style');
+    style.textContent=`
+      .quick-comment-options{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+      .quick-comment-btn{border:1px solid rgba(52,211,153,.25);background:rgba(16,185,129,.10);color:#d1fae5;border-radius:999px;padding:8px 12px;font-size:.85rem;font-weight:950;transition:.15s}
+      .quick-comment-btn:hover{background:rgba(16,185,129,.20);transform:translateY(-1px)}
+    `;
+    document.head.appendChild(style);
+
+    const modal=document.createElement('div');
+    modal.id='playerQuickCommentModal';
+    modal.className='hidden fixed inset-0 z-[75] bg-black/75 backdrop-blur-sm p-4 flex items-center justify-center';
+    modal.innerHTML=`
+      <div class="card rounded-3xl p-5 max-w-xl w-full max-h-[92vh] overflow-y-auto">
+        <div class="flex justify-between items-center mb-4">
+          <div>
+            <h3 class="text-xl font-black text-emerald-300">發佈玩家留言</h3>
+            <p id="playerQuickGameTitle" class="text-xs text-slate-500 font-black mt-1">點快捷留言可自動帶入，也可以自己修改</p>
+          </div>
+          <button onclick="closePlayerQuickCommentModal()" class="rounded-xl bg-slate-800 px-3 py-2">關閉</button>
+        </div>
+        <div class="hot-modal-grid">
+          <div>
+            <div class="hot-market-title">快捷留言</div>
+            <div id="playerQuickOptions" class="quick-comment-options"></div>
+          </div>
+          <div>
+            <div class="hot-market-title">留言內容</div>
+            <textarea id="playerQuickText" class="hot-textarea" placeholder="請輸入至少 5 個字"></textarea>
+          </div>
+          <div id="playerQuickMsg" class="text-sm font-black text-pink-300 hidden"></div>
+          <div class="hot-modal-actions">
+            <button class="hot-cancel" onclick="closePlayerQuickCommentModal()">取消</button>
+            <button class="hot-submit" onclick="submitPlayerQuickComment()">送出留言</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+
+  function quickEsc(s){
+    return String(s||'').replace(/[&<>'"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c];});
+  }
+
+  window.fillPlayerQuickComment=function(text){
+    const input=document.getElementById('playerQuickText');
+    if(input){ input.value=text; input.focus(); }
+  };
+
+  window.closePlayerQuickCommentModal=function(){
+    const modal=document.getElementById('playerQuickCommentModal');
+    if(modal) modal.classList.add('hidden');
+  };
+
+  window.openPlayerQuickCommentModal=function(){
+    ensurePlayerQuickModal();
+    const g=(typeof v32CurrentGame==='function') ? v32CurrentGame() : null;
+    const title=document.getElementById('playerQuickGameTitle');
+    if(title && g) title.textContent=`${g.away||'客隊'} vs ${g.home||'主隊'}｜點快捷留言可自動帶入，也可以自己修改`;
+    const options=document.getElementById('playerQuickOptions');
+    if(options){
+      options.innerHTML=QUICK_COMMENTS.map(t=>`<button type="button" class="quick-comment-btn" onclick="fillPlayerQuickComment('${quickEsc(t)}')">${quickEsc(t)}</button>`).join('');
+    }
+    const text=document.getElementById('playerQuickText');
+    const msg=document.getElementById('playerQuickMsg');
+    if(text) text.value='';
+    if(msg) msg.classList.add('hidden');
+    document.getElementById('playerQuickCommentModal').classList.remove('hidden');
+  };
+
+  window.submitPlayerQuickComment=async function(){
+    const me=typeof getCurrentUser==='function' ? getCurrentUser() : null;
+    const msg=document.getElementById('playerQuickMsg');
+    const text=(document.getElementById('playerQuickText')?.value||'').trim();
+    if(!me){ alert('請先登入後再留言'); if(typeof openAuthModal==='function') openAuthModal('login'); return; }
+    if(text.length<5){ if(msg){ msg.textContent='留言至少 5 個字'; msg.classList.remove('hidden'); } return; }
+    try{
+      await sbFetch('comments',{method:'POST',headers:{Prefer:'return=minimal'},body:{
+        game_key:typeof v32CurrentGameKey==='function' ? v32CurrentGameKey() : '',
+        account:me.account,
+        nickname:me.nickname,
+        content:text,
+        market_pick:'',
+        comment_type:'player',
+        match_date:(typeof v33DateByMode==='function' && typeof v33DayMode!=='undefined') ? v33DateByMode(v33DayMode) : (typeof v32Today==='function' ? v32Today() : new Date().toISOString().slice(0,10)),
+        created_at:new Date().toISOString()
+      }});
+      closePlayerQuickCommentModal();
+      alert('留言成功');
+      if(typeof v32LoadPlayerComments==='function') v32LoadPlayerComments();
+    }catch(e){
+      if(msg){ msg.textContent='留言失敗：'+(e&&e.message?e.message:e); msg.classList.remove('hidden'); }
+      else alert('留言失敗：'+(e&&e.message?e.message:e));
+    }
+  };
+
+  window.openCommentComposer=function(board){
+    const me=typeof getCurrentUser==='function' ? getCurrentUser() : null;
+    if(!me){ alert('請先登入後再留言'); if(typeof openAuthModal==='function') openAuthModal('login'); return; }
+    if(typeof v35IsRookie==='function' && v35IsRookie()){
+      if(typeof v35PaogeMsg==='function') v35PaogeMsg(); else alert('請先升級會員後再留言');
+      return;
+    }
+    if(String(board||'').includes('好手')){
+      if(typeof openHotPickModal==='function') openHotPickModal();
+      return;
+    }
+    openPlayerQuickCommentModal();
+  };
+})();
+</script>
