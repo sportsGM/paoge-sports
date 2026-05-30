@@ -1,11 +1,11 @@
-name: Sports sync v114 footballTeamNote fix
+name: Sports sync v121 battle-info parser
 
 on:
   schedule:
-    # 小同步：每小時 10 分檢查一次；避開 UTC 16:10，因為那是台灣 00:10 大同步
-    - cron: "10 0-15,17-23 * * *"
-    # 大同步：每天台灣時間 00:10 = UTC 16:10
-    - cron: "10 16 * * *"
+    # 小同步：每小時 17 分檢查新增賽事與盤口變動；不覆蓋舊分析
+    - cron: "17 0-15,17-23 * * *"
+    # 大同步：每天台灣時間 00:13 = UTC 16:13；今日已完賽保留，來源消失才下架
+    - cron: "13 16 * * *"
   workflow_dispatch:
     inputs:
       sync_mode:
