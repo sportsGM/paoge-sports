@@ -2,10 +2,7 @@ name: Sports sync v120 duplicate-safe keep finished
 
 on:
   schedule:
-    # 小同步：每小時 10 分檢查新增賽事與盤口變動；不覆蓋舊分析
-    - cron: "10 0-15,17-23 * * *"
-    # 大同步：每天台灣時間 00:10 = UTC 16:10；今日已完賽保留，來源消失才下架
-    - cron: "10 16 * * *"
+    - cron: "10 * * * *"
   workflow_dispatch:
     inputs:
       sync_mode:
