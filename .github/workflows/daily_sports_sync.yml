@@ -1,7 +1,6 @@
 name: Sports sync v120 duplicate-safe keep finished
 
 on:
-  schedule:
   workflow_dispatch:
     inputs:
       sync_mode:
