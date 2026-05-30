@@ -1,4 +1,4 @@
-name: Sports sync v115 event-date odds refresh
+name: Sports sync v117 event-date hourly odds refresh
 
 on:
   schedule:
