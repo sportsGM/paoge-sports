@@ -366,6 +366,14 @@ body:not(.vip-user) #modalBody section.grid > div:nth-child(n+2)::after{
   }
 }
 
+
+/* v115 top marquee */
+.access-marquee{overflow:hidden;border-bottom:1px solid rgba(251,191,36,.28);background:linear-gradient(90deg,rgba(251,191,36,.12),rgba(52,211,153,.08),rgba(96,165,250,.10));color:#fcd34d;font-weight:950;font-size:.88rem;letter-spacing:.04em}
+.access-marquee-track{display:inline-block;white-space:nowrap;padding:9px 0;animation:accessMarquee 18s linear infinite}
+@keyframes accessMarquee{0%{transform:translateX(100vw)}100%{transform:translateX(-100%)}}
+@media (max-width:640px){.access-marquee{font-size:.78rem}.access-marquee-track{animation-duration:14s;padding:7px 0}}
+
+.compact-note{grid-column:1/-1}.compact-note .note-value{font-size:.82rem;line-height:1.25rem;white-space:normal;max-height:2.6rem;overflow:hidden}
 </style>
 <script src="./config.js"></script>
 </head>
@@ -403,6 +411,11 @@ body:not(.vip-user) #modalBody section.grid > div:nth-child(n+2)::after{
     </nav>
   </div>
 </header>
+
+<div class="access-marquee" aria-label="權限升級通知">
+  <div class="access-marquee-track">升級權限 / 開通帳號 請聯繫代理　　升級權限 / 開通帳號 請聯繫代理　　升級權限 / 開通帳號 請聯繫代理</div>
+</div>
+
 
 <main class="max-w-7xl mx-auto p-4">
   <section class="grid lg:grid-cols-[1fr_365px] gap-4">
@@ -821,6 +834,31 @@ function shortFootballMarket(val,type){
 function marketMini(label,val,tone){ const cls=tone==='emerald'?'text-emerald-300 border-emerald-400/20 bg-emerald-400/10':tone==='blue'?'text-blue-300 border-blue-400/20 bg-blue-400/10':'text-pink-300 border-pink-400/20 bg-pink-400/10'; return `<div class="rounded-xl border ${cls} p-2 overflow-hidden"><div class="text-[11px] font-black">${label}</div><div class="market mt-1 truncate" title="${String(val||'')}">${val}</div></div>`; }
 
 function closeGame(){ $('gameModal').classList.add('hidden'); document.body.classList.remove('modal-open'); }
+
+function isPendingValue(v){ return /待更新|資料整理中|未公布|尚未公布|先發尚未公布|^-$/.test(String(v||'').trim()); }
+function hasRealRows(rows){ return Array.isArray(rows) && rows.some(r=>Array.isArray(r)&&r.some(v=>String(v||'').trim() && !isPendingValue(v))); }
+function cpblFallbackComparison(g){
+  if(g?.league!=='CPBL') return [];
+  const conf=Array.isArray(g.conf)?g.conf:(Array.isArray(g.confidence)?g.confidence:[58,56,55]);
+  const away=g.away||'客隊', home=g.home||'主隊';
+  const money=String(g.money||'').trim();
+  const spread=String(g.spread||'').trim();
+  const total=String(g.total||'').trim();
+  const out=[];
+  if(money && !/未開盤|待確認/.test(money)) out.push(['獨贏盤口', money, `${conf[0]||58}%`, conf[0]||58, 100-(conf[0]||58), away, home]);
+  if(spread && !/未開盤|待確認/.test(spread)) out.push(['讓分盤口', spread, `${conf[1]||56}%`, conf[1]||56, 100-(conf[1]||56), away, home]);
+  if(total && !/未開盤|待確認/.test(total)) out.push(['大小分盤口', total, `${conf[2]||55}%`, conf[2]||55, 100-(conf[2]||55), away, home]);
+  return out;
+}
+function compactStarterRowsForCpbl(rows){
+  if(!Array.isArray(rows)) return rows;
+  return rows.map(r=>{
+    if(!r || !Array.isArray(r.stats)) return r;
+    const real=r.stats.filter(s=>Array.isArray(s)&&!isPendingValue(s[1]));
+    if(real.length) return {...r,stats:real};
+    return {...r, stats:[['狀態','先發尚未公布；資料中心會依 Yahoo 運動 / CPBL 官方頁面自動補齊']]};
+  });
+}
 function buildGameData(g){
   const base=data[g.sport]||data.baseball;
   const aj=g.analysis_json||{};
@@ -829,6 +867,7 @@ function buildGameData(g){
   if(Array.isArray(aj.starters) && aj.starters.length){
     copy.topTitle='雙方先發';
     copy.top=aj.starters.map(x=>({team:x.team||'',name:x.name||'先發待公布',role:x.role||'先發',stats:cleanStats(x.stats,[["ERA","待更新"],["WHIP","待更新"],["勝投","待更新"],["敗投","待更新"],["近況","待更新"]])}));
+    if(g.league==='CPBL') copy.top=compactStarterRowsForCpbl(copy.top);
   }
   if(g.sport==='football'){
     copy.topTitle='雙方近況分析';
@@ -852,6 +891,7 @@ function buildGameData(g){
     return t && !/待更新|資料整理中|未公布|^-$|未完全明確|主要判斷|需配合臨場|資料未完|尚未明確/.test(t);
   };
   if(Array.isArray(aj.metrics)&&aj.metrics.length) copy.metrics=aj.metrics.filter(m=>Array.isArray(m)&&m.some(isRealValue));
+  // v121：CPBL 不再用假量表補待更新；只有對戰資訊真的抓到才顯示雙方對比。
   if(Array.isArray(aj.injuries)&&aj.injuries.length){
     const realInj=aj.injuries.filter(r=>Array.isArray(r)&&r.some(isRealValue));
     if(realInj.length) copy.injuries=realInj;
@@ -914,7 +954,7 @@ function footballAnalysis(d,g){
   const con=String(fs.conclusion||conFallback).replace(/Yahoo奇摩運動|SofaScore|玩運彩|台灣運彩|資料來源|數據來源/g,'');
   return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-amber-400/20 p-4"><div class="text-amber-300 font-black mb-2">主隊｜${g.away}</div><p class="text-slate-300 font-bold leading-7">${homeTxt}</p></div><div class="rounded-2xl bg-slate-900/75 border border-blue-400/20 p-4"><div class="text-blue-300 font-black mb-2">客隊｜${g.home}</div><p class="text-slate-300 font-bold leading-7">${awayTxt}</p></div><div class="md:col-span-2 rounded-2xl bg-slate-950 border border-slate-800 p-4"><div class="text-emerald-300 font-black mb-2">AI綜合判斷</div><p class="text-slate-300 font-bold leading-7">${con}</p></div></div>`;
 }
-function topBlock(rows,sport){ if(sport==='football'){ const left=rows.slice(0,3), right=rows.slice(3,6); return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-a mb-3">${left[0]?.team||''}</div><div class="space-y-3">${left.map((r,idx)=>footballPlayer(r,idx+1,'a')).join('')}</div></div><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-b mb-3">${right[0]?.team||''}</div><div class="space-y-3">${right.map((r,idx)=>footballPlayer(r,idx+1,'b')).join('')}</div></div></div>`; } return `<div class="grid md:grid-cols-2 gap-4">${rows.map(r=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="text-sm text-slate-500">${r.team}</div><div class="text-xl font-black mt-1">${r.name} <span class="hero-tag">${r.role}</span></div><div class="inline-stats mt-4 pitcher-stats">${r.stats.map(s=>{const k=String(s[0]||''); const v=String(s[1]||''); const isNote=/近況|狀態|備註/.test(k); return isNote ? `<div class="inline-stat note-stat"><div class="k">${k}</div><div class="v note-value" title="${v.replace(/"/g,'&quot;')}">${v}</div></div>` : `<div class="inline-stat"><div class="v">${v}</div><div class="k">${k}</div></div>`}).join('')}</div></div>`).join('')}</div>`; }
+function topBlock(rows,sport){ if(sport==='football'){ const left=rows.slice(0,3), right=rows.slice(3,6); return `<div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-a mb-3">${left[0]?.team||''}</div><div class="space-y-3">${left.map((r,idx)=>footballPlayer(r,idx+1,'a')).join('')}</div></div><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="football-head team-head-b mb-3">${right[0]?.team||''}</div><div class="space-y-3">${right.map((r,idx)=>footballPlayer(r,idx+1,'b')).join('')}</div></div></div>`; } return `<div class="grid md:grid-cols-2 gap-4">${rows.map(r=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="text-sm text-slate-500">${r.team}</div><div class="text-xl font-black mt-1">${r.name} <span class="hero-tag">${r.role}</span></div><div class="inline-stats mt-4 pitcher-stats">${r.stats.map(s=>{const k=String(s[0]||''); const v=String(s[1]||''); const isNote=/近況|狀態|備註/.test(k); return isNote ? `<div class="inline-stat note-stat compact-note"><div class="k">${k}</div><div class="v note-value text-sm leading-5" title="${v.replace(/"/g,'&quot;')}">${v}</div></div>` : `<div class="inline-stat"><div class="v">${v}</div><div class="k">${k}</div></div>`}).join('')}</div></div>`).join('')}</div>`; }
 function footballPlayer(r,no,tone){ return `<div class="rounded-2xl ${tone==='a'?'bg-sky-400/5 border-sky-400/20':'bg-amber-400/5 border-amber-400/20'} border p-4"><div class="flex items-center justify-between gap-3"><div><div class="text-sm font-black ${tone==='a'?'text-blue-300':'text-amber-300'}">第 ${no} 核心</div><div class="text-lg font-black mt-1">${r.name}</div></div><span class="hero-tag">${r.role}</span></div><div class="text-xs text-slate-400 mt-2 leading-5">${r.award||''}</div></div>`; }
 function injuries(rows,sport){ if(sport==='baseball'){ const teams=[...new Set(rows.map(r=>r[0]))]; return `<div class="grid md:grid-cols-2 gap-4">${teams.map((team,idx)=>`<div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="font-black ${idx===0?'text-blue-300':'text-amber-300'} mb-3">${team}</div><div class="space-y-2">${rows.filter(r=>r[0]===team).map(r=>`<div class="rounded-xl bg-slate-950 border border-slate-800 p-3 flex justify-between gap-3"><div><div class="font-black text-sm">${r[1]}</div><div class="text-xs text-slate-400 mt-1">${r[2]}</div></div><div class="text-xs text-pink-300 font-black shrink-0">${r[3]}</div></div>`).join('')}</div></div>`).join('')}</div>`; } return `<div class="grid md:grid-cols-2 gap-2">${rows.map(r=>`<div class="rounded-xl bg-slate-900/75 border border-slate-800 p-3 flex justify-between gap-3"><div><div class="font-black">${r[0]}｜${r[1]}</div><div class="text-sm text-slate-400 mt-1">${r[2]}</div></div><div class="text-xs text-pink-300 font-black shrink-0">${r[3]}</div></div>`).join('')}</div>`; }
 function comparison(metrics,away,home){ return `<div class="space-y-4">${metrics.map(m=>`<div><div class="grid grid-cols-[78px_1fr_78px] md:grid-cols-[130px_1fr_130px] gap-3 items-center"><div><div class="font-black text-blue-300">${m[1]}</div><div class="text-[11px] text-slate-500">${m[5]}</div></div><div><div class="flex justify-between text-sm font-black mb-2"><span>${away}</span><span>${m[0]}</span><span>${home}</span></div><div class="comp-bar" style="--l:${m[3]}%;--r:${m[4]}%"><span class="midline"></span></div></div><div class="text-right"><div class="font-black text-amber-300">${m[2]}</div><div class="text-[11px] text-slate-500">${m[6]}</div></div></div></div>`).join('')}</div>`; }
