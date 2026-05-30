@@ -1,6 +1,11 @@
-name: Sports sync v120 duplicate-safe keep finished
+name: Sports sync v114 footballTeamNote fix
 
 on:
+  schedule:
+    # 小同步：每小時 10 分檢查一次；避開 UTC 16:10，因為那是台灣 00:10 大同步
+    - cron: "10 0-15,17-23 * * *"
+    # 大同步：每天台灣時間 00:10 = UTC 16:10
+    - cron: "10 16 * * *"
   workflow_dispatch:
     inputs:
       sync_mode:
