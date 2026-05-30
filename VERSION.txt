@@ -1,1 +1,1 @@
-v119 keep finished + CPBL battle info
+v120_DUPLICATE_SAFE_INSERT_PATCH
