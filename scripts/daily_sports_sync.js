@@ -1592,7 +1592,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v131-cpbl-loose-group-parser', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v135-cpbl-reset-before-merge', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 
@@ -1925,6 +1925,25 @@ async function mergeDailyGames(rows, { markMissingInactive = false, modeLabel = 
   const incoming = dedupeGames(rows).map(r => stripDailyRow(withAnalysisMeta(r)));
   try { await writeRawSportsData(incoming); } catch(e) { console.warn('raw data center skipped:', e.message); }
 
+  // v135：CPBL 已確認 parsed=3，但 daily_games_unique_game 舊資料會讓其中一場寫入/移動時撞 unique。
+  // 所以在 merge 前，針對本次 incoming 的 CPBL 日期/顯示池，先清掉 daily_games 舊 CPBL 列，再用 incoming 重建。
+  // 只處理 CPBL，不動 MLB/NPB/KBO/NBA 等其他資料。
+  const cpblPools = [...new Set(incoming
+    .filter(r => r.league === 'CPBL' && r.game_date && r.game_day_type)
+    .map(r => `${r.game_date}|${r.game_day_type}`))];
+  for (const pool of cpblPools) {
+    const [date, dayType] = pool.split('|');
+    try {
+      await supabaseRequest(`daily_games?game_date=eq.${encodeURIComponent(date)}&game_day_type=eq.${encodeURIComponent(dayType)}&league=eq.CPBL`, {
+        method: 'DELETE',
+        headers: { Prefer: 'return=minimal' }
+      });
+      console.log(`CPBL reset v135: deleted old CPBL daily_games date=${date} dayType=${dayType}`);
+    } catch(e) {
+      console.warn(`CPBL reset v135 failed date=${date} dayType=${dayType}: ${e.message}`);
+    }
+  }
+
   const existingRows = await supabaseRequest('daily_games?game_day_type=in.(today,tomorrow)&active=eq.true&select=*&limit=2000', { method: 'GET' }).catch(e => {
     console.warn('load existing daily_games failed, fallback to insert-only:', e.message);
     return [];
@@ -2010,15 +2029,15 @@ async function upsertDailyGames(rows) {
 
 
 
-async function verifyCpblVisibleV134() {
+async function verifyCpblVisibleV135() {
   for (const dayType of ['today', 'tomorrow']) {
     const date = dayType === 'tomorrow' ? dateTW(1) : dateTW(0);
     try {
       const rows = await supabaseRequest(`daily_games?game_date=eq.${date}&game_day_type=eq.${dayType}&league=eq.CPBL&active=eq.true&select=game_date,game_day_type,league,game_time,away,home,game_status,active&order=game_time.asc`);
       const names = (rows || []).map(r => `${r.game_time || ''} ${r.away || ''} vs ${r.home || ''} status=${r.game_status || ''}`).join(' / ');
-      console.log(`CPBL visible verify v134: ${dayType} date=${date} dbActive=${(rows || []).length} rows=${names}`);
+      console.log(`CPBL visible verify v135: ${dayType} date=${date} dbActive=${(rows || []).length} rows=${names}`);
     } catch (e) {
-      console.warn(`CPBL visible verify v134 failed: ${dayType} date=${date}: ${e.message}`);
+      console.warn(`CPBL visible verify v135 failed: ${dayType} date=${date}: ${e.message}`);
     }
   }
 }
@@ -2039,6 +2058,6 @@ async function main() {
     await upsertDailyGames(games);
     console.log(games.length ? `Full sync wrote ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed for today/tomorrow display pools.');
   }
-  await verifyCpblVisibleV134();
+  await verifyCpblVisibleV135();
 }
 main().catch(err => { console.error(err); process.exit(1); });

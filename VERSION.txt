@@ -1,4 +1,3 @@
-v134
-- Actions log 加入 CPBL visible verify v134，可直接確認 daily_games 前端可見 active 場次。
-- 保留前端 CPBL 保險合併顯示。
-- 保留 v133/v132/v131 所有修正。
+v135
+- 修正 CPBL parsed=3 但前端只看到 2：merge 前先重建本次日期/顯示池的 CPBL daily_games，避開 daily_games_unique_game 舊資料撞 key。
+- Actions 會印 CPBL reset v135 與 CPBL visible verify v135。
