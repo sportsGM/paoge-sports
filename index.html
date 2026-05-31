@@ -3056,8 +3056,11 @@ async function v52LoadDailyGames(){
     leagues.baseball=[['MLB','MLB'],['NPB','日本職棒'],['CPBL','中華職棒'],['KBO','韓國職棒']];
     leagues.basketball=[['NBA','NBA'],['WNBA','WNBA'],['CBA','中國職籃']];
     leagues.football=[['足球','足球']];
-    if(!games[state.league]?.length){
-      const first=leagues[state.sport]?.[0]?.[0];
+    // v129: 切換今日/明日時不要因為目前聯盟暫時沒有資料就自動跳回 MLB。
+    // 只有在目前 state.league 已經不是該運動分類內的合法聯盟時，才改回第一個。
+    const validLeagues = (leagues[state.sport] || []).map(x => x[0]);
+    if(!validLeagues.includes(state.league)){
+      const first=validLeagues[0];
       if(first) state.league=first;
     }
     renderDaySwitch();
