@@ -1,4 +1,4 @@
-v132
-- CPBL parsed=3 但前台只有 2 的修正：同步結束後逐筆確認 CPBL rows 是否真的寫入 daily_games。
-- Actions 會顯示 CPBL force ensure v132 結果。
-- 保留 v131 所有功能。
+v133
+- 前端 CPBL 保險讀取：daily_games 中華職棒會另外查一次再合併，避免台鋼 vs 樂天已寫入但前台漏顯示。
+- Actions 增加 CPBL visible verify v133，跑完會列出 Supabase daily_games 實際可見的中職場次。
+- 保留 v131 中職寬鬆解析、明日不跳 MLB、足球無讓分。

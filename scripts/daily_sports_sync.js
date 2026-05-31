@@ -1592,7 +1592,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v132-cpbl-force-ensure', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v131-cpbl-loose-group-parser', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 
@@ -1799,35 +1799,6 @@ async function insertDailyRows(rows) {
   }
   console.log(`insertDailyRows complete: inserted=${inserted}, duplicate_patched=${patchedDup}, requested=${cleanRows.length}`);
 }
-
-async function forceEnsureCpblDailyRows(rows) {
-  const cpblRows = (rows || []).filter(r => r && r.league === 'CPBL' && r.active !== false);
-  if (!cpblRows.length) return;
-  const cleanRows = normalizeDailyRowsForInsert(cpblRows.map(r => stripDailyRow(withAnalysisMeta(r, { cpbl_force_ensure_v132: true }))));
-  let ensured = 0, inserted = 0, patched = 0, failed = 0;
-  for (const row of cleanRows) {
-    try {
-      const exists = await supabaseRequest(`daily_games?${dailyUniqueFilter(row)}&select=id&limit=1`, { method: 'GET' }).catch(() => []);
-      if (Array.isArray(exists) && exists.length) {
-        await patchDailyUniqueRow(row, { ...row, active: true, updated_at: nowISO() });
-        patched++;
-      } else {
-        await supabaseRequest('daily_games', {
-          method: 'POST',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify([row])
-        });
-        inserted++;
-      }
-      ensured++;
-    } catch (e) {
-      failed++;
-      console.warn(`CPBL force ensure failed: ${row.game_day_type} ${row.game_date} ${row.game_time} ${row.away} vs ${row.home}:`, e.message);
-    }
-  }
-  console.log(`CPBL force ensure v132: parsed=${cleanRows.length}, ensured=${ensured}, inserted=${inserted}, patched=${patched}, failed=${failed}`);
-}
-
 async function patchDailyRow(row, patch) {
   await supabaseRequest(`daily_games?${dailyGameFilter(row)}`, {
     method: 'PATCH',
@@ -2024,6 +1995,27 @@ async function mergeDailyGames(rows, { markMissingInactive = false, modeLabel = 
   console.log(msg);
   await writeSyncStatus('success', msg, incoming.length);
 }
+
+async function verifyCpblVisibleRowsV133(rows) {
+  const cpbl = (rows || []).filter(r => r && r.league === 'CPBL');
+  if (!cpbl.length) return;
+  const groups = new Map();
+  for (const r of cpbl) {
+    const key = `${r.game_day_type || ''}|${r.game_date || ''}`;
+    if (!groups.has(key)) groups.set(key, { dayType: r.game_day_type, date: r.game_date, rows: [] });
+    groups.get(key).rows.push(r);
+  }
+  for (const g of groups.values()) {
+    try {
+      const dbRows = await supabaseRequest(`daily_games?game_date=eq.${encodeURIComponent(String(g.date || ''))}&game_day_type=eq.${encodeURIComponent(String(g.dayType || ''))}&league=eq.CPBL&active=eq.true&select=game_time,away,home,active,updated_at&order=game_time.asc&limit=30`, { method: 'GET' });
+      const list = Array.isArray(dbRows) ? dbRows : [];
+      console.log(`CPBL visible verify v133: parsed=${g.rows.length}, dbActive=${list.length}, ${g.dayType} ${g.date} :: ${list.map(x=>`${x.game_time} ${x.away} vs ${x.home}`).join(' / ')}`);
+    } catch (e) {
+      console.warn('CPBL visible verify v133 failed:', e.message);
+    }
+  }
+}
+
 async function incrementalDailyGames(rows) {
   // v119：每小時重新掃描玩運彩，不只補刷舊賽事，也會新增 00:10 後才上架的新賽事。
   // A. 新場次：直接新增；若已有盤口就用目前盤口產生分析，未開盤則先標記待確認。
@@ -2048,11 +2040,11 @@ async function main() {
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   if (incremental) {
     await incrementalDailyGames(games);
-    await forceEnsureCpblDailyRows(games);
+    await verifyCpblVisibleRowsV133(games);
     console.log(games.length ? `Incremental check finished for ${games.length} games.` : 'Incremental check found no games.');
   } else {
     await upsertDailyGames(games);
-    await forceEnsureCpblDailyRows(games);
+    await verifyCpblVisibleRowsV133(games);
     console.log(games.length ? `Full sync wrote ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed for today/tomorrow display pools.');
   }
 }

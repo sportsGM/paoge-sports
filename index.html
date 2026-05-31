@@ -3051,6 +3051,24 @@ async function v52LoadDailyGames(){
       grouped[league].push(v52NormalizeDailyGame(r));
     });
     Object.keys(grouped).forEach(k=>{ games[k]=grouped[k]; });
+    // v133: 中華職棒保險讀取。若主查詢或前端合併漏掉 CPBL 某場，另外用 CPBL 條件重讀一次並合併。
+    try{
+      const cpblRows = await sbFetch('daily_games',{
+        query:`?game_date=eq.${usedDate}&game_day_type=eq.${v65GameDayType()}&league=eq.CPBL&select=*&order=game_time.asc&limit=30`
+      });
+      if(cpblRows && cpblRows.length){
+        const merged = Array.isArray(games.CPBL) ? [...games.CPBL] : [];
+        const keyOf = g => [g.time || g.game_time || '', g.away || '', g.home || ''].map(x=>String(x).trim()).join('|');
+        const seen = new Set(merged.map(keyOf));
+        cpblRows.forEach(r=>{
+          const g = v52NormalizeDailyGame(r);
+          const k = keyOf(g);
+          if(!seen.has(k)){ merged.push(g); seen.add(k); }
+        });
+        games.CPBL = merged;
+        console.log('v133 CPBL frontend ensure:', 'dbRows='+cpblRows.length, 'shown='+games.CPBL.length, games.CPBL.map(g=>`${g.away} vs ${g.home}`).join(' / '));
+      }
+    }catch(e){ console.warn('v133 CPBL frontend ensure failed', e); }
     // v61: 聯盟按鈕固定顯示，不再因為某一聯盟暫時沒資料就消失。
     // 這樣 MLB / 日本職棒 / 中華職棒 / 韓國職棒 都會一直在棒球分類。
     leagues.baseball=[['MLB','MLB'],['NPB','日本職棒'],['CPBL','中華職棒'],['KBO','韓國職棒']];
