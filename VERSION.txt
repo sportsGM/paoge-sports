@@ -1,3 +1,3 @@
-v135
-- 修正 CPBL parsed=3 但前端只看到 2：merge 前先重建本次日期/顯示池的 CPBL daily_games，避開 daily_games_unique_game 舊資料撞 key。
-- Actions 會印 CPBL reset v135 與 CPBL visible verify v135。
+v136
+- 修正 CPBL duplicate key：unique key 不含 game_date，改為刪除同一 today/tomorrow 池全部 CPBL 舊列後重建。
+- 保留 v135/v134 verify 與前端修正。
