@@ -37,7 +37,7 @@ jobs:
       - name: Run sports sync
         run: npm run sync:sports
         env:
-          SYNC_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_mode || (github.event.schedule == '10 16 * * *' && 'full' || 'incremental') }}
+          SYNC_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_mode || (github.event.schedule == '13 16 * * *' && 'full' || 'incremental') }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SEARCH_PROVIDER: ${{ secrets.SEARCH_PROVIDER }}
