@@ -785,7 +785,7 @@ function renderGames(){
     const spread = isOpen ? (g.sport==='football' ? shortFootballMarket(g.spread,'spread') : g.spread) : '未開盤';
     const total = isOpen ? shortFootballMarket(g.total,'total') : '未開盤';
     const dataBtn = isOpen ? `<button onclick="openGame(${i},'data')" class="rounded-xl bg-gradient-to-r from-amber-400 to-emerald-400 text-slate-950 font-black px-3 py-3">查看數據</button>` : `<button onclick="openGame(${i},'data')" class="rounded-xl border border-slate-700 bg-slate-900 text-slate-400 font-black px-3 py-3">未開盤</button>`;
-    return `<article class="soft rounded-2xl p-3"><div class="grid xl:grid-cols-[minmax(0,1fr)_320px_240px] gap-3 items-center"><div class="min-w-0"><div class="flex items-center gap-2 text-xs text-slate-500 font-black"><span>${g.time}</span><span>•</span><span>${leagueName}</span></div><h3 class="text-lg font-black truncate mt-1">${title}</h3></div><div class="grid grid-cols-3 gap-2">${marketMini('獨贏',money,'emerald')}${marketMini('讓分',spread,'blue')}${marketMini('大小',total,'pink')}</div><div class="action-row">${dataBtn}<button onclick="openGame(${i},'board')" class="rounded-xl border border-slate-700 bg-slate-950 text-slate-100 font-black px-3 py-3">留言板</button></div></div></article>`;
+    return `<article class="soft rounded-2xl p-3"><div class="grid xl:grid-cols-[minmax(0,1fr)_320px_240px] gap-3 items-center"><div class="min-w-0"><div class="flex items-center gap-2 text-xs text-slate-500 font-black"><span>${g.time}</span><span>•</span><span>${leagueName}</span>${g.game_status && g.game_status !== 'upcoming' ? `<span>•</span><span class="${g.game_status==='finished'?'text-slate-400':'text-amber-300'}">${g.game_status==='finished'?'已完賽':g.game_status==='live'?'比賽中':g.game_status}</span>` : ''}</div><h3 class="text-lg font-black truncate mt-1">${title}</h3></div><div class="grid grid-cols-3 gap-2">${marketMini('獨贏',money,'emerald')}${marketMini('讓分',spread,'blue')}${marketMini('大小',total,'pink')}</div><div class="action-row">${dataBtn}<button onclick="openGame(${i},'board')" class="rounded-xl border border-slate-700 bg-slate-950 text-slate-100 font-black px-3 py-3">留言板</button></div></div></article>`;
   }).join('');
 }
 function shortFootballMarket(val,type){
@@ -2989,7 +2989,7 @@ function v52TodayTW(offsetDays=0){
     return d.toISOString().slice(0,10);
   }
 }
-function v53DailyGamesDate(){ return v52TodayTW(0); }
+function v53DailyGamesDate(){ return v52TodayTW(v65GameDayType()==='tomorrow' ? 1 : 0); }
 
 function v65GameDayType(){ return state.dayType || 'today'; }
 function v52NormalizeDailyGame(r){
@@ -3005,13 +3005,15 @@ function v52NormalizeDailyGame(r){
     source_url:r.source_url || '',
     source_name:'',
     analysis_json:r.analysis_json || {},
+    game_status: r.game_status || 'upcoming',
+    status_label: r.game_status === 'finished' ? '已完賽' : (r.game_status === 'live' ? '比賽中' : '未開賽'),
     market_open: !(r.analysis_json && r.analysis_json.market_open === false)
   };
 }
 async function v52LoadDailyGames(){
   if(!sbReady()) return;
   try{
-    const statusFilter = '&game_status=eq.upcoming';
+    const statusFilter = ''; // v128 safe: 顯示所有 active 賽事；今日查今天，明日查明天
     let usedDate = v53DailyGamesDate();
     let rows=await sbFetch('daily_games',{
       query:`?game_date=eq.${usedDate}&game_day_type=eq.${v65GameDayType()}${statusFilter}&active=eq.true&select=*&order=game_time.asc,league.asc&limit=180`
@@ -3054,8 +3056,11 @@ async function v52LoadDailyGames(){
     leagues.baseball=[['MLB','MLB'],['NPB','日本職棒'],['CPBL','中華職棒'],['KBO','韓國職棒']];
     leagues.basketball=[['NBA','NBA'],['WNBA','WNBA'],['CBA','中國職籃']];
     leagues.football=[['足球','足球']];
-    if(!games[state.league]?.length){
-      const first=leagues[state.sport]?.[0]?.[0];
+    // v129: 切換今日/明日時不要因為目前聯盟暫時沒有資料就自動跳回 MLB。
+    // 只有在目前 state.league 已經不是該運動分類內的合法聯盟時，才改回第一個。
+    const validLeagues = (leagues[state.sport] || []).map(x => x[0]);
+    if(!validLeagues.includes(state.league)){
+      const first=validLeagues[0];
       if(first) state.league=first;
     }
     renderDaySwitch();
@@ -3334,44 +3339,57 @@ submitHotPickModal = async function(){
 
 
 <script>
-/* ===== v132: ONLY football no-spread patch; keep original sports sync/parser untouched ===== */
+/* ===== v127 safe: football no spread + show active games safely ===== */
 (function(){
-  function isFootballGame(g){
+  function isFootballGameV127(g){
     return !!g && (g.sport === 'football' || /足球|soccer/i.test(String(g.league || '')));
   }
-  function isFootballSpreadText(v){
+  function isFootballSpreadTextV127(v){
     return /^(讓分|受讓)｜/.test(String(v || '').trim());
   }
-
-  function removeFootballSpreadCards(){
+  function isGamePredictableV127(g){
+    return !g || !g.game_status || g.game_status === 'upcoming';
+  }
+  function gameStatusTextV127(g){
+    if(!g || !g.game_status || g.game_status === 'upcoming') return '只限運彩盤口';
+    if(g.game_status === 'finished') return '已完賽';
+    if(g.game_status === 'live') return '比賽中';
+    return String(g.game_status);
+  }
+  function getPredictionGameByKeyV127(key, market){
+    try{
+      return (typeof allGamesFlat === 'function' ? allGamesFlat() : []).find(g => typeof predKey === 'function' && predKey(g, market || 'spread') === key);
+    }catch(e){ return null; }
+  }
+  function removeFootballSpreadCardsV127(){
     try{
       if(!(state && state.sport === 'football')) return;
       document.querySelectorAll('#games article').forEach(article => {
-        const marketGrid = article.querySelector('.grid.grid-cols-3, .grid.grid-cols-2');
+        const marketGrid = article.querySelector('.grid.grid-cols-3');
         if(!marketGrid) return;
         const cards = Array.from(marketGrid.children);
-        const spreadCard = cards.find(el => /讓分/.test(el.textContent || ''));
+        const spreadCard = cards.find(el => /讓分/.test(el.textContent || '')) || cards[1];
         if(spreadCard) spreadCard.remove();
         marketGrid.classList.remove('grid-cols-3');
         marketGrid.classList.add('grid-cols-2');
       });
-    }catch(e){ console.warn('v132 remove football spread cards failed', e); }
+    }catch(e){ console.warn('v127 remove football spread cards failed', e); }
   }
 
   if(typeof renderGames === 'function'){
-    const oldRenderGamesV132 = renderGames;
+    const oldRenderGames = renderGames;
     window.renderGames = function(){
-      const out = oldRenderGamesV132.apply(this, arguments);
-      removeFootballSpreadCards();
+      const out = oldRenderGames.apply(this, arguments);
+      removeFootballSpreadCardsV127();
       return out;
     };
-    setTimeout(removeFootballSpreadCards, 0);
+    setTimeout(removeFootballSpreadCardsV127, 0);
   }
 
   if(typeof summaryCards === 'function'){
-    const oldSummaryCardsV132 = summaryCards;
+    const oldSummaryCards = summaryCards;
     window.summaryCards = function(g){
-      if(!isFootballGame(g)) return oldSummaryCardsV132.apply(this, arguments);
+      if(!isFootballGameV127(g)) return oldSummaryCards.apply(this, arguments);
       const money = typeof shortFootballMarket === 'function' ? shortFootballMarket(g.money, 'money') : (g.money || '獨贏待確認');
       const total = typeof shortFootballMarket === 'function' ? shortFootballMarket(g.total, 'total') : (g.total || '大小待確認');
       return `<section class="grid lg:grid-cols-2 gap-4">${mainMarket('獨贏參考', money, g.conf && g.conf[0], '大眾參考方向', 'emerald')}${mainMarket('大小分', total, g.conf && g.conf[2], '方向參考率', 'pink')}</section>`;
@@ -3379,85 +3397,89 @@ submitHotPickModal = async function(){
   }
 
   if(typeof searchIntelBlock === 'function'){
-    const oldSearchIntelBlockV132 = searchIntelBlock;
+    const oldSearchIntelBlock = searchIntelBlock;
     window.searchIntelBlock = function(g){
-      if(!isFootballGame(g)) return oldSearchIntelBlockV132.apply(this, arguments);
+      if(!isFootballGameV127(g)) return oldSearchIntelBlock.apply(this, arguments);
       try{
-        const html = oldSearchIntelBlockV132.apply(this, arguments);
-        if(!html) return html;
-        return String(html)
-          .replace(/<div class="rounded-2xl bg-slate-950 border border-slate-800 p-4"><div class="flex justify-between text-sm font-black mb-2"><span>讓分方向<\/span><span>.*?<\/span><\/div><div class="conf"><i style="width:.*?"><\/i><\/div><\/div>/s, '')
-          .replace(/grid md:grid-cols-3/g, 'grid md:grid-cols-2');
-      }catch(e){
-        return oldSearchIntelBlockV132.apply(this, arguments);
-      }
+        if(typeof v35IsVip === 'function' && !v35IsVip()){
+          return `<section class="soft rounded-2xl p-4"><h3 class="section-title">AI 情蒐量表</h3><div class="permission-lock-msg">權限不足，請聯繫砲哥加入專屬會員群</div></section>`;
+        }
+        const aj=(g.analysis_json||{}), si=aj.search_intel||{};
+        if(!si.summary) return '';
+        const support=si.support||{}, picks=si.picks||{};
+        const bar=(name,pct)=>`<div class="rounded-2xl bg-slate-950 border border-slate-800 p-4"><div class="flex justify-between text-sm font-black mb-2"><span>${name}</span><span>${pct||0}%</span></div><div class="conf"><i style="width:${pct||0}%"></i></div></div>`;
+        const tags=(si.search_titles||[]).slice(0,3).map(t=>`<span class="hero-tag">${String(t).replace(/Yahoo奇摩運動|玩運彩|資料來源|數據來源/g,'').slice(0,28)}</span>`).join(' ');
+        return `<section class="soft rounded-2xl p-4"><h3 class="section-title">AI 情蒐量表</h3>
+          <div class="rounded-2xl bg-slate-950 border border-amber-400/20 p-4 mb-4"><div class="text-amber-300 font-black mb-2">AI 情蒐重點</div><p class="text-slate-300 font-bold leading-7">${sanitizeFootballAiText(si.summary,g)}</p><div class="mt-3 flex flex-wrap gap-2">${tags}</div></div>
+          <div class="grid md:grid-cols-2 gap-3 mb-4">${bar('獨贏方向',support.money)}${bar('大小分方向',support.total)}</div>
+          <div class="grid md:grid-cols-2 gap-4"><div class="rounded-2xl bg-slate-900/75 border border-slate-800 p-4"><div class="text-blue-300 font-black mb-2">風險提醒</div><p class="text-slate-300 font-bold leading-7">${sanitizeFootballAiText(si.risk||'臨場盤口與名單異動仍需留意。',g)}</p></div><div class="rounded-2xl bg-emerald-400/10 border border-emerald-400/20 p-4"><div class="text-xs text-slate-400 font-black">AI 結論</div><div class="text-emerald-300 font-black mt-2">最穩：${picks.safest||'待確認'}</div><div class="text-amber-300 font-black mt-1">主推：${picks.main||'待確認'}</div><div class="text-pink-300 font-black mt-1">副推：${picks.second||'待確認'}</div><div class="text-slate-300 font-black mt-1">信心指數：${picks.confidence||'中'}</div></div></div>
+        </section>`;
+      }catch(e){ return oldSearchIntelBlock.apply(this, arguments); }
     };
   }
 
-  function getPredictionGameByKey(key, market){
-    try{
-      return (typeof allGamesFlat === 'function' ? allGamesFlat() : []).find(g => typeof predKey === 'function' && predKey(g, market || 'spread') === key);
-    }catch(e){ return null; }
-  }
-
-  if(typeof renderPredictionCenter === 'function'){
-    window.renderPredictionCenter = function(){
-      const preds = loadPreds();
-      const all = allGamesFlat();
-      const list = predictionSportFilter === 'all' ? all : all.filter(g => g.sport === predictionSportFilter);
-      const count = Object.keys(preds).length;
-      const filterBtns = ['all','baseball','basketball','football'].map(s => `<button class="pred-filter-btn ${predictionSportFilter===s?'active':''}" onclick="setPredictionSport('${s}')">${sportLabel(s)}</button>`).join('');
-      $('predictionContent').innerHTML = `<div class="pred-filter">${filterBtns}</div><div class="pred-summary"><div class="box"><div class="label">今日已預測</div><div class="val">${count} 筆</div></div><div class="box"><div class="label">待結算</div><div class="val">賽後統計</div></div><div class="box"><div class="label">盤口限制</div><div class="val">足球無讓分</div></div></div><div class="grid md:grid-cols-2 gap-3">${list.map(g=>{
-        const totalLine = extractNumber(g.total);
-        const spreadLine = cleanMarketText(g.spread || '讓分盤');
-        const moneyChoices = [`${g.away} 獨贏`,`${g.home} 獨贏`];
-        const spreadChoices = [spreadLine, oppositeSpread(g)];
-        const totalChoices = [`大 ${totalLine}`,`小 ${totalLine}`];
-        const spreadBlock = isFootballGame(g) ? '' : renderMarketBlock(g,'spread','讓分',spreadLine,spreadChoices);
-        return `<article class="pred-card"><div class="pred-top"><div><div class="pred-game">${g.away} vs ${g.home}</div><div class="pred-line">${g.league}｜${sportLabel(g.sport)}</div></div><div class="pred-status">只限運彩盤口</div></div>${renderMarketBlock(g,'moneyline','獨贏','選擇勝方',moneyChoices)}${spreadBlock}${renderMarketBlock(g,'total','大小分','大小 '+totalLine,totalChoices)}<div class="text-xs text-slate-500 font-black">每日賽後依賽果資料統計是否命中。</div></article>`;
-      }).join('')}</div>`;
-    };
-  }
+  window.renderPredictionCenter = function(){
+    const preds = loadPreds();
+    const all = allGamesFlat();
+    const list = predictionSportFilter === 'all' ? all : all.filter(g => g.sport === predictionSportFilter);
+    const count = Object.keys(preds).length;
+    const filterBtns = ['all','baseball','basketball','football'].map(s => `<button class="pred-filter-btn ${predictionSportFilter===s?'active':''}" onclick="setPredictionSport('${s}')">${sportLabel(s)}</button>`).join('');
+    $('predictionContent').innerHTML = `<div class="pred-filter">${filterBtns}</div><div class="pred-summary"><div class="box"><div class="label">今日已預測</div><div class="val">${count} 筆</div></div><div class="box"><div class="label">待結算</div><div class="val">賽後統計</div></div><div class="box"><div class="label">盤口限制</div><div class="val">足球無讓分</div></div></div><div class="grid md:grid-cols-2 gap-3">${list.map(g=>{
+      const totalLine = extractNumber(g.total);
+      const spreadLine = cleanMarketText(g.spread || '讓分盤');
+      const moneyChoices = [`${g.away} 獨贏`,`${g.home} 獨贏`];
+      const spreadChoices = [spreadLine, oppositeSpread(g)];
+      const totalChoices = [`大 ${totalLine}`,`小 ${totalLine}`];
+      const canPick = isGamePredictableV127(g);
+      const spreadBlock = isFootballGameV127(g) ? '' : renderMarketBlock(g,'spread','讓分',spreadLine,spreadChoices);
+      const pickBlocks = canPick ? `${renderMarketBlock(g,'moneyline','獨贏','選擇勝方',moneyChoices)}${spreadBlock}${renderMarketBlock(g,'total','大小分','大小 '+totalLine,totalChoices)}` : `<div class="pred-market"><div class="pred-market-head"><div class="pred-market-title">賽事已關閉預測</div><div class="pred-market-line clean">${gameStatusTextV127(g)}</div></div><div class="pred-note">已開打或已完賽的賽事不能再送出預測。</div></div>`;
+      return `<article class="pred-card"><div class="pred-top"><div><div class="pred-game">${g.away} vs ${g.home}</div><div class="pred-line">${g.league}｜${sportLabel(g.sport)}</div></div><div class="pred-status">${gameStatusTextV127(g)}</div></div>${pickBlocks}<div class="text-xs text-slate-500 font-black">每日賽後依賽果資料統計是否命中。</div></article>`;
+    }).join('')}</div>`;
+  };
 
   if(typeof savePrediction === 'function'){
-    const oldSavePredictionV132 = savePrediction;
+    const oldSavePrediction = savePrediction;
     window.savePrediction = async function(key, choice, market){
-      const g = getPredictionGameByKey(key, market);
-      if((market === 'spread' || /_spread$/.test(String(key))) && isFootballGame(g)){
+      const g = getPredictionGameByKeyV127(key, market);
+      if(g && !isGamePredictableV127(g)){
+        alert('賽事已開打或已完賽，不能再送出預測。');
+        return;
+      }
+      if((market === 'spread' || /_spread$/.test(String(key))) && isFootballGameV127(g)){
         alert('足球賽事不開放讓分盤預測，請選擇獨贏或大小分。');
         return;
       }
-      return oldSavePredictionV132.apply(this, arguments);
+      return oldSavePrediction.apply(this, arguments);
     };
   }
 
   if(typeof v33Choices === 'function'){
-    const oldV33ChoicesV132 = v33Choices;
+    const oldV33Choices = v33Choices;
     window.v33Choices = function(){
       const g = typeof v32CurrentGame === 'function' ? v32CurrentGame() : null;
-      const choices = oldV33ChoicesV132.apply(this, arguments) || [];
-      return isFootballGame(g) ? choices.filter(c => !isFootballSpreadText(c.label) && !isFootballSpreadText(c.value)) : choices;
+      const choices = oldV33Choices.apply(this, arguments) || [];
+      return isFootballGameV127(g) ? choices.filter(c => !isFootballSpreadTextV127(c.label) && !isFootballSpreadTextV127(c.value)) : choices;
     };
   }
   if(typeof v32MarketChoices === 'function'){
-    const oldV32MarketChoicesV132 = v32MarketChoices;
+    const oldV32MarketChoices = v32MarketChoices;
     window.v32MarketChoices = function(){
       const g = typeof v32CurrentGame === 'function' ? v32CurrentGame() : null;
-      const choices = oldV32MarketChoicesV132.apply(this, arguments) || [];
-      return isFootballGame(g) ? choices.filter(c => !isFootballSpreadText(c)) : choices;
+      const choices = oldV32MarketChoices.apply(this, arguments) || [];
+      return isFootballGameV127(g) ? choices.filter(c => !isFootballSpreadTextV127(c)) : choices;
     };
   }
   if(typeof submitHotPickModal === 'function'){
-    const oldSubmitHotPickModalV132 = submitHotPickModal;
+    const oldSubmitHotPickModal = submitHotPickModal;
     window.submitHotPickModal = async function(){
       const g = typeof v32CurrentGame === 'function' ? v32CurrentGame() : null;
-      if(isFootballGame(g) && isFootballSpreadText(v33HotPickSelected)){
+      if(isFootballGameV127(g) && isFootballSpreadTextV127(v33HotPickSelected)){
         const msg = $('hotPickModalMsg');
         if(msg){ msg.textContent='足球賽事不開放讓分盤熱推，請選擇獨贏或大小分。'; msg.classList.remove('hidden'); }
         else alert('足球賽事不開放讓分盤熱推，請選擇獨贏或大小分。');
         return;
       }
-      return oldSubmitHotPickModalV132.apply(this, arguments);
+      return oldSubmitHotPickModal.apply(this, arguments);
     };
   }
 })();
