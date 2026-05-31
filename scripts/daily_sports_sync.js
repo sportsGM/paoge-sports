@@ -1995,27 +1995,6 @@ async function mergeDailyGames(rows, { markMissingInactive = false, modeLabel = 
   console.log(msg);
   await writeSyncStatus('success', msg, incoming.length);
 }
-
-async function verifyCpblVisibleRowsV133(rows) {
-  const cpbl = (rows || []).filter(r => r && r.league === 'CPBL');
-  if (!cpbl.length) return;
-  const groups = new Map();
-  for (const r of cpbl) {
-    const key = `${r.game_day_type || ''}|${r.game_date || ''}`;
-    if (!groups.has(key)) groups.set(key, { dayType: r.game_day_type, date: r.game_date, rows: [] });
-    groups.get(key).rows.push(r);
-  }
-  for (const g of groups.values()) {
-    try {
-      const dbRows = await supabaseRequest(`daily_games?game_date=eq.${encodeURIComponent(String(g.date || ''))}&game_day_type=eq.${encodeURIComponent(String(g.dayType || ''))}&league=eq.CPBL&active=eq.true&select=game_time,away,home,active,updated_at&order=game_time.asc&limit=30`, { method: 'GET' });
-      const list = Array.isArray(dbRows) ? dbRows : [];
-      console.log(`CPBL visible verify v133: parsed=${g.rows.length}, dbActive=${list.length}, ${g.dayType} ${g.date} :: ${list.map(x=>`${x.game_time} ${x.away} vs ${x.home}`).join(' / ')}`);
-    } catch (e) {
-      console.warn('CPBL visible verify v133 failed:', e.message);
-    }
-  }
-}
-
 async function incrementalDailyGames(rows) {
   // v119：每小時重新掃描玩運彩，不只補刷舊賽事，也會新增 00:10 後才上架的新賽事。
   // A. 新場次：直接新增；若已有盤口就用目前盤口產生分析，未開盤則先標記待確認。
@@ -2029,6 +2008,21 @@ async function upsertDailyGames(rows) {
   return mergeDailyGames(rows, { markMissingInactive: true, modeLabel: 'full' });
 }
 
+
+
+async function verifyCpblVisibleV134() {
+  for (const dayType of ['today', 'tomorrow']) {
+    const date = dayType === 'tomorrow' ? dateTW(1) : dateTW(0);
+    try {
+      const rows = await supabaseRequest(`daily_games?game_date=eq.${date}&game_day_type=eq.${dayType}&league=eq.CPBL&active=eq.true&select=game_date,game_day_type,league,game_time,away,home,game_status,active&order=game_time.asc`);
+      const names = (rows || []).map(r => `${r.game_time || ''} ${r.away || ''} vs ${r.home || ''} status=${r.game_status || ''}`).join(' / ');
+      console.log(`CPBL visible verify v134: ${dayType} date=${date} dbActive=${(rows || []).length} rows=${names}`);
+    } catch (e) {
+      console.warn(`CPBL visible verify v134 failed: ${dayType} date=${date}: ${e.message}`);
+    }
+  }
+}
+
 async function main() {
   await waitUntilTaipeiDateReady();
   console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}). Today/tomorrow display pools enabled. SYNC_MODE=${SYNC_MODE}`);
@@ -2040,12 +2034,11 @@ async function main() {
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   if (incremental) {
     await incrementalDailyGames(games);
-    await verifyCpblVisibleRowsV133(games);
     console.log(games.length ? `Incremental check finished for ${games.length} games.` : 'Incremental check found no games.');
   } else {
     await upsertDailyGames(games);
-    await verifyCpblVisibleRowsV133(games);
     console.log(games.length ? `Full sync wrote ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed for today/tomorrow display pools.');
   }
+  await verifyCpblVisibleV134();
 }
 main().catch(err => { console.error(err); process.exit(1); });
