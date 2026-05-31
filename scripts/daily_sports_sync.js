@@ -1663,9 +1663,155 @@ async function writeRawSportsData(rows) {
   } catch (e) { console.warn('normalize_raw_sports_games_v70_optional skipped:', e.message); }
 }
 
-async function loadPromotedTomorrowRows() {
-  // v119：不再用另外搬資料的方式處理跨日；改用 event identity 合併。
-  return [];
+function normalizeTimeForCompare(v) {
+  const raw = String(v || '').trim().toUpperCase().replace(/\s+/g, ' ');
+  let m = raw.match(/\b(AM|PM)\s*(\d{1,2})[:：](\d{2})\b/);
+  let ap = '', h = 0, min = 0;
+  if (m) { ap = m[1]; h = Number(m[2]); min = Number(m[3]); }
+  else {
+    m = raw.match(/\b(\d{1,2})[:：](\d{2})\s*(AM|PM)?\b/);
+    if (!m) return raw;
+    h = Number(m[1]); min = Number(m[2]); ap = m[3] || '';
+  }
+  if (ap === 'AM' && h === 12) h = 0;
+  if (ap === 'PM' && h < 12) h += 12;
+  return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+}
+function timeMinutesForCompare(v) {
+  const t = normalizeTimeForCompare(v);
+  const m = String(t || '').match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+function timeDiffScore(a, b) {
+  const am = timeMinutesForCompare(a), bm = timeMinutesForCompare(b);
+  if(am == null || bm == null) return { score: 0, diff: null };
+  const diff = Math.abs(am - bm);
+  if(diff === 0) return { score: 28, diff };
+  if(diff <= 30) return { score: 22, diff };
+  if(diff <= 90) return { score: 14, diff };
+  if(diff <= 180) return { score: 6, diff };
+  return { score: -8, diff };
+}
+function teamNormForCompare(v) {
+  return String(v || '')
+    .replace(/\s+/g,'')
+    .replace(/兄弟象/g,'兄弟')
+    .replace(/中信兄弟/g,'兄弟')
+    .replace(/統一7-ELEVEn獅|統一獅/g,'統一')
+    .replace(/樂天桃猿/g,'樂天')
+    .replace(/富邦悍將/g,'富邦')
+    .replace(/味全龍/g,'味全')
+    .replace(/台鋼雄鷹/g,'台鋼')
+    .trim();
+}
+function matchupKeyNoTime(row) {
+  return [row.sport, row.league, row.away, row.home].map(v => String(v || '').trim()).join('|');
+}
+function scrapedRunKey(row) {
+  return [row.game_day_type, row.sport, row.league, row.away, row.home, normalizeTimeForCompare(row.game_time)]
+    .map(v=>String(v||'').trim()).join('|');
+}
+function numberToken(v) {
+  const m = String(v || '').match(/[-+]?\d+(?:\.\d+)?/);
+  return m ? Number(m[0]) : null;
+}
+function marketSimilarityScore(a, b) {
+  let score = 0;
+  for (const k of ['money','spread','total']) {
+    const av = String(a?.[k] || '').trim();
+    const bv = String(b?.[k] || '').trim();
+    if(!av || !bv) continue;
+    if(av === bv) { score += 8; continue; }
+    const an = numberToken(av), bn = numberToken(bv);
+    if(an != null && bn != null && Math.abs(an - bn) <= 0.25) score += 4;
+  }
+  return score;
+}
+function promotionMatchScore(oldTomorrow, todayRow) {
+  if(!oldTomorrow || !todayRow) return { score: -999, diff: null, reason: 'empty' };
+  if(String(oldTomorrow.sport || '') !== String(todayRow.sport || '')) return { score: -999, diff: null, reason: 'sport_mismatch' };
+  if(String(oldTomorrow.league || '') !== String(todayRow.league || '')) return { score: -999, diff: null, reason: 'league_mismatch' };
+  const oa = teamNormForCompare(oldTomorrow.away), oh = teamNormForCompare(oldTomorrow.home);
+  const ta = teamNormForCompare(todayRow.away), th = teamNormForCompare(todayRow.home);
+  let score = 25;
+  let teamMode = 'none';
+  if(oa && oh && oa === ta && oh === th) { score += 55; teamMode = 'exact_order'; }
+  else if(oa && oh && oa === th && oh === ta) { score += 43; teamMode = 'reversed'; }
+  else if(oa && oh && [ta, th].includes(oa) && [ta, th].includes(oh)) { score += 38; teamMode = 'same_pair'; }
+  else return { score: -999, diff: null, reason: 'team_mismatch' };
+  const ts = timeDiffScore(oldTomorrow.game_time, todayRow.game_time);
+  score += ts.score;
+  score += marketSimilarityScore(oldTomorrow, todayRow);
+  // 已經開盤、有舊分析的明日池資料優先移動到今日，避免同一場重複分析。
+  if(isMarketOpenRow(oldTomorrow)) score += 8;
+  if(oldTomorrow.analysis_json?.odds_hash) score += 6;
+  return { score, diff: ts.diff, reason: teamMode };
+}
+async function loadPromotedTomorrowRows(todayScrapedRows = []) {
+  // v139：比分數安全搬移 tomorrow → today。
+  // 流程：先抓今日、明日；今日已有同一場時，用相似分數找昨天明日池最高分那筆移到 today，並壓掉今日新分析。
+  // 目的：同隊連打三天時，不靠隊名硬判斷；用聯盟/隊伍/時間/盤口/舊分析累積分數，最高分才搬。
+  try {
+    const rows = await supabaseRequest(
+      `daily_games?game_date=eq.${dateTW(0)}&game_day_type=eq.tomorrow&active=eq.true&select=*&limit=500`,
+      { method: 'GET' }
+    );
+    const sourceTomorrow = Array.isArray(rows) ? rows : [];
+    const todayRows = (Array.isArray(todayScrapedRows) ? todayScrapedRows : []).filter(r => r.game_day_type === 'today');
+    const usedTodayKeys = new Set();
+    const promoted = [];
+    let matched = 0, missing = 0, skippedLowScore = 0;
+    const samples = [];
+
+    for (const oldTomorrow of sourceTomorrow) {
+      const candidates = todayRows
+        .filter(t => !usedTodayKeys.has(scrapedRunKey(t)))
+        .map(t => ({ row: t, ...promotionMatchScore(oldTomorrow, t) }))
+        .filter(x => x.score > -900)
+        .sort((a,b) => b.score - a.score);
+      const best = candidates[0] || null;
+      const canMoveByScore = best && best.score >= 70;
+      const noTodaySameTeams = !todayRows.some(t => {
+        const ms = promotionMatchScore(oldTomorrow, t);
+        return ms.score > -900;
+      });
+      if(!canMoveByScore && !noTodaySameTeams) { skippedLowScore++; continue; }
+
+      const copy = stripDailyRow(oldTomorrow);
+      copy.game_day_type = 'today';
+      copy.game_date = dateTW(0);
+      copy.game_status = copy.game_status || 'upcoming';
+      copy.updated_at = nowISO();
+      copy.analysis_json = {
+        ...(copy.analysis_json || {}),
+        promoted_from_tomorrow: true,
+        promoted_v139_mode: canMoveByScore ? 'score_matched_today_source' : 'missing_from_today_source',
+        promoted_v139_score: best ? best.score : 0,
+        promoted_v139_time_diff: best ? best.diff : null,
+        promoted_v139_reason: best ? best.reason : 'missing',
+        promoted_at: nowISO(),
+        display_pool: 'today',
+        source_day: (copy.analysis_json && copy.analysis_json.source_day) || 'tomorrow'
+      };
+      if(canMoveByScore) {
+        matched++;
+        usedTodayKeys.add(scrapedRunKey(best.row));
+        samples.push(`${copy.league} ${copy.away} vs ${copy.home} score=${best.score} diff=${best.diff ?? 'NA'}`);
+      } else {
+        missing++;
+        samples.push(`${copy.league} ${copy.away} vs ${copy.home} missing`);
+      }
+      promoted.push(copy);
+    }
+
+    console.log(`Promote tomorrow to today v139 score-match: sourceTomorrow=${sourceTomorrow.length}, todayScraped=${todayRows.length}, promoted=${promoted.length}, matched=${matched}, missing=${missing}, skippedLowScore=${skippedLowScore}, suppressedToday=${usedTodayKeys.size}, date=${dateTW(0)}`);
+    if(samples.length) console.log(`Promote tomorrow to today v139 samples: ${samples.slice(0,20).join(' / ')}`);
+    return { promoted, suppressedTodayKeys: usedTodayKeys };
+  } catch (e) {
+    console.warn('Promote tomorrow to today v139 skipped:', e.message);
+    return { promoted: [], suppressedTodayKeys: new Set() };
+  }
 }
 
 function withAnalysisMeta(row, extra = {}) {
@@ -2044,11 +2190,14 @@ async function verifyCpblVisibleV135() {
 async function main() {
   await waitUntilTaipeiDateReady();
   console.log(`Taiwan sync date: today=${dateTW(0)} (${mdTW(0)}). Today/tomorrow display pools enabled. SYNC_MODE=${SYNC_MODE}`);
-  const promoted = await loadPromotedTomorrowRows();
   const incremental = SYNC_MODE === 'incremental';
   const scraped = await scrapePlaySportWithBrowser({ skipEnrichment: incremental });
-  const games = [...promoted, ...scraped];
-  console.log(`Parsed valid games v120 hourly-new-games display-pool: promoted=${promoted.length}, scraped=${scraped.length}, total=${games.length}`);
+  const promotionResult = await loadPromotedTomorrowRows(scraped);
+  const promoted = promotionResult.promoted || [];
+  const suppressedTodayKeys = promotionResult.suppressedTodayKeys || new Set();
+  const scrapedAfterPromotion = scraped.filter(g => !(g.game_day_type === 'today' && suppressedTodayKeys.has(scrapedRunKey(g))));
+  const games = [...scrapedAfterPromotion, ...promoted];
+  console.log(`Parsed valid games v139 score-promote display-pool: scraped=${scraped.length}, suppressedToday=${scraped.length - scrapedAfterPromotion.length}, promoted=${promoted.length}, total=${games.length}`);
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   if (incremental) {
     await incrementalDailyGames(games);
