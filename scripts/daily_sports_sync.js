@@ -1592,7 +1592,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v131-cpbl-loose-group-parser', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v132-cpbl-force-ensure', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 
@@ -1799,6 +1799,35 @@ async function insertDailyRows(rows) {
   }
   console.log(`insertDailyRows complete: inserted=${inserted}, duplicate_patched=${patchedDup}, requested=${cleanRows.length}`);
 }
+
+async function forceEnsureCpblDailyRows(rows) {
+  const cpblRows = (rows || []).filter(r => r && r.league === 'CPBL' && r.active !== false);
+  if (!cpblRows.length) return;
+  const cleanRows = normalizeDailyRowsForInsert(cpblRows.map(r => stripDailyRow(withAnalysisMeta(r, { cpbl_force_ensure_v132: true }))));
+  let ensured = 0, inserted = 0, patched = 0, failed = 0;
+  for (const row of cleanRows) {
+    try {
+      const exists = await supabaseRequest(`daily_games?${dailyUniqueFilter(row)}&select=id&limit=1`, { method: 'GET' }).catch(() => []);
+      if (Array.isArray(exists) && exists.length) {
+        await patchDailyUniqueRow(row, { ...row, active: true, updated_at: nowISO() });
+        patched++;
+      } else {
+        await supabaseRequest('daily_games', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify([row])
+        });
+        inserted++;
+      }
+      ensured++;
+    } catch (e) {
+      failed++;
+      console.warn(`CPBL force ensure failed: ${row.game_day_type} ${row.game_date} ${row.game_time} ${row.away} vs ${row.home}:`, e.message);
+    }
+  }
+  console.log(`CPBL force ensure v132: parsed=${cleanRows.length}, ensured=${ensured}, inserted=${inserted}, patched=${patched}, failed=${failed}`);
+}
+
 async function patchDailyRow(row, patch) {
   await supabaseRequest(`daily_games?${dailyGameFilter(row)}`, {
     method: 'PATCH',
@@ -2019,9 +2048,11 @@ async function main() {
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   if (incremental) {
     await incrementalDailyGames(games);
+    await forceEnsureCpblDailyRows(games);
     console.log(games.length ? `Incremental check finished for ${games.length} games.` : 'Incremental check found no games.');
   } else {
     await upsertDailyGames(games);
+    await forceEnsureCpblDailyRows(games);
     console.log(games.length ? `Full sync wrote ${games.length} valid games to Supabase daily_games.` : 'No valid games parsed for today/tomorrow display pools.');
   }
 }

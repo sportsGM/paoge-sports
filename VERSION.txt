@@ -1,3 +1,4 @@
-v131
-- 補強中華職棒解析：不再因單場時間欄位/隊伍列結構不同而漏掉。
-- 保留 v130：明日分類不跳 MLB、足球無讓分、棒籃保留讓分。
+v132
+- CPBL parsed=3 但前台只有 2 的修正：同步結束後逐筆確認 CPBL rows 是否真的寫入 daily_games。
+- Actions 會顯示 CPBL force ensure v132 結果。
+- 保留 v131 所有功能。
