@@ -286,20 +286,9 @@ function numericHint(text, keys){
 
 function convertGroupToGame(group, target, sourceUrl) {
   const allText = group.rows.map(r => r.text).join(' ');
-  const time = extractTime(allText) || extractTime(group.rows?.[0]?.text || '');
-  // v130：玩運彩偶爾會有一場中職的時間或隊伍欄位結構不同；時間抓不到時仍保留賽事，避免整場被丟掉。
-  const displayTime = time || '時間待確認';
-  let { awayTeam, homeTeam, awayDetail, homeDetail } = getTeamsFromGroup(group, target.sport);
-  if ((isBadTeamName(awayTeam) || isBadTeamName(homeTeam) || awayTeam === homeTeam) && target.sport === 'baseball') {
-    const linkTeams = teamLinksFromGroup(group).map(x => cleanTeamName(x.team)).filter(x => !isBadTeamName(x));
-    const unique = [...new Set(linkTeams)];
-    if (unique.length >= 2) {
-      awayTeam = unique[0];
-      homeTeam = unique[1];
-      awayDetail = awayDetail || '先發待公布';
-      homeDetail = homeDetail || '先發待公布';
-    }
-  }
+  const time = extractTime(allText);
+  if (!time) return null;
+  const { awayTeam, homeTeam, awayDetail, homeDetail } = getTeamsFromGroup(group, target.sport);
   if (isBadTeamName(awayTeam) || isBadTeamName(homeTeam) || awayTeam === homeTeam) return null;
   // MLB/Japanese/KBO/CPBL 賽事不得含足球比分格式，例如「0 vs S. 0 馬卡拉」。
   if (target.sport === 'baseball' && /(vs|v\.s\.?|\bS\.\s*\d)/i.test(`${awayTeam} ${homeTeam}`)) return null;
@@ -334,7 +323,7 @@ function convertGroupToGame(group, target, sourceUrl) {
   ] : [];
 
   return {
-    game_date: group.syncDate || dateTW(0), game_day_type: group.dayType || 'today', game_status: 'upcoming', sport: target.sport, league: target.league, game_time: displayTime,
+    game_date: group.syncDate || dateTW(0), game_day_type: group.dayType || 'today', game_status: 'upcoming', sport: target.sport, league: target.league, game_time: time,
     // 前台用 away vs home 顯示；依需求主隊放第一個，故欄位反向存放。
     away: homeTeam, home: awayTeam,
     money: markets.money, spread: markets.spread, total: markets.total, confidence: markets.confidence,
@@ -489,9 +478,6 @@ async function scrapePlaySportWithBrowser(options = {}) {
               g.game_date = group.syncDate;
               games.push(g);
               parsed++;
-            } else if (target.league === 'CPBL') {
-              const preview = String(group.rows?.map(r=>r.text).join(' ') || '').replace(/\s+/g,' ').slice(0,180);
-              console.warn(`CPBL group rejected by parser: ${preview}`);
             }
           }
           console.log(`${displayDay} ${target.label}: source=${displayDay}, groups=${totalGroups}, finished_detected_kept=${finishedDetected}, parsed=${parsed}, game_date=${syncDate}`);
@@ -1586,7 +1572,7 @@ async function supabaseRequest(path, options = {}) {
   try { return txt ? JSON.parse(txt) : null; } catch { return txt; }
 }
 async function writeSyncStatus(status, message, count = 0) {
-  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v130-cpbl-fallback-parser', created_at: nowISO() }]) }); }
+  try { await supabaseRequest('daily_sync_status', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify([{ status, message, games_count: count, source: 'v119-keep-finished-cpbl-battle-info', created_at: nowISO() }]) }); }
   catch(e) { console.warn('daily_sync_status not written:', e.message); }
 }
 
