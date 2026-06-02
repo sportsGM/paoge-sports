@@ -1754,10 +1754,12 @@ async function loadPromotedTomorrowRows(todayScrapedRows = []) {
   // 目的：同隊連打三天時，不靠隊名硬判斷；用聯盟/隊伍/時間/盤口/舊分析累積分數，最高分才搬。
   try {
     const rows = await supabaseRequest(
-      `daily_games?game_date=eq.${dateTW(0)}&game_day_type=eq.tomorrow&active=eq.true&select=*&limit=500`,
+      `daily_games?game_day_type=eq.tomorrow&active=eq.true&select=*&limit=1000`,
       { method: 'GET' }
     );
-    const sourceTomorrow = Array.isArray(rows) ? rows : [];
+    // v140：凌晨 00:00~清晨來源 today 可能空；不要只查單一日期造成昨天明日池沒被搬。
+    // 只允許把 game_date 等於今天的 tomorrow 池搬到 today，避免同隊連打三天被搬錯天。
+    const sourceTomorrow = (Array.isArray(rows) ? rows : []).filter(r => String(r.game_date || '') === dateTW(0));
     const todayRows = (Array.isArray(todayScrapedRows) ? todayScrapedRows : []).filter(r => r.game_day_type === 'today');
     const usedTodayKeys = new Set();
     const promoted = [];
@@ -1786,10 +1788,10 @@ async function loadPromotedTomorrowRows(todayScrapedRows = []) {
       copy.analysis_json = {
         ...(copy.analysis_json || {}),
         promoted_from_tomorrow: true,
-        promoted_v139_mode: canMoveByScore ? 'score_matched_today_source' : 'missing_from_today_source',
-        promoted_v139_score: best ? best.score : 0,
-        promoted_v139_time_diff: best ? best.diff : null,
-        promoted_v139_reason: best ? best.reason : 'missing',
+        promoted_v140_mode: canMoveByScore ? 'score_matched_today_source' : 'missing_from_today_source',
+        promoted_v140_score: best ? best.score : 0,
+        promoted_v140_time_diff: best ? best.diff : null,
+        promoted_v140_reason: best ? best.reason : 'missing',
         promoted_at: nowISO(),
         display_pool: 'today',
         source_day: (copy.analysis_json && copy.analysis_json.source_day) || 'tomorrow'
@@ -1805,11 +1807,11 @@ async function loadPromotedTomorrowRows(todayScrapedRows = []) {
       promoted.push(copy);
     }
 
-    console.log(`Promote tomorrow to today v139 score-match: sourceTomorrow=${sourceTomorrow.length}, todayScraped=${todayRows.length}, promoted=${promoted.length}, matched=${matched}, missing=${missing}, skippedLowScore=${skippedLowScore}, suppressedToday=${usedTodayKeys.size}, date=${dateTW(0)}`);
-    if(samples.length) console.log(`Promote tomorrow to today v139 samples: ${samples.slice(0,20).join(' / ')}`);
+    console.log(`Promote tomorrow to today v140 score-match: sourceTomorrow=${sourceTomorrow.length}, todayScraped=${todayRows.length}, promoted=${promoted.length}, matched=${matched}, missing=${missing}, skippedLowScore=${skippedLowScore}, suppressedToday=${usedTodayKeys.size}, date=${dateTW(0)}`);
+    if(samples.length) console.log(`Promote tomorrow to today v140 samples: ${samples.slice(0,20).join(' / ')}`);
     return { promoted, suppressedTodayKeys: usedTodayKeys };
   } catch (e) {
-    console.warn('Promote tomorrow to today v139 skipped:', e.message);
+    console.warn('Promote tomorrow to today v140 skipped:', e.message);
     return { promoted: [], suppressedTodayKeys: new Set() };
   }
 }
@@ -1891,8 +1893,7 @@ function eventIdentityFilter(row) {
   ].join('&');
 }
 function dailyUniqueFilter(row) {
-  // 對應目前 Supabase 的 daily_games_v74_unique_idx：game_date + game_day_type + league + away + home + game_time
-  // 注意：這個 unique key 沒有 sport，所以這裡也不要放 sport，避免撞到舊資料時查不到。
+  // v142：先用完整欄位找同場，避免誤傷。
   return [
     eqFilter('game_date', row.game_date),
     eqFilter('game_day_type', row.game_day_type),
@@ -1900,6 +1901,17 @@ function dailyUniqueFilter(row) {
     eqFilter('away', row.away),
     eqFilter('home', row.home),
     eqFilter('game_time', row.game_time)
+  ].join('&');
+}
+function looseDailyUniqueFilter(row) {
+  // v142：資料庫實際 unique key 有些版本沒有 game_date；若完整 filter 找不到，就用這個跨日期找舊列並恢復 active。
+  return [
+    eqFilter('game_day_type', row.game_day_type),
+    eqFilter('sport', row.sport),
+    eqFilter('league', row.league),
+    eqFilter('game_time', row.game_time),
+    eqFilter('home', row.home),
+    eqFilter('away', row.away)
   ].join('&');
 }
 async function patchDailyUniqueRow(row, patch) {
@@ -1930,16 +1942,19 @@ async function insertDailyRows(rows) {
       inserted++;
     } catch (err) {
       if (!isDuplicateKeyError(err)) throw err;
-      const existing = await supabaseRequest(`daily_games?${dailyUniqueFilter(row)}&select=*&limit=1`, { method: 'GET' }).catch(() => []);
-      const old = Array.isArray(existing) ? existing[0] : null;
+      let existing = await supabaseRequest(`daily_games?${dailyUniqueFilter(row)}&select=*&limit=1`, { method: 'GET' }).catch(() => []);
+      let old = Array.isArray(existing) ? existing[0] : null;
+      if (!old) {
+        existing = await supabaseRequest(`daily_games?${looseDailyUniqueFilter(row)}&select=*&order=updated_at.desc&limit=1`, { method: 'GET' }).catch(() => []);
+        old = Array.isArray(existing) ? existing[0] : null;
+      }
       if (old) {
-        const { patch, reason } = buildPatchForExisting(old, row, 'insert_duplicate_patch');
-        await patchDailyUniqueRow(row, { ...patch, active: true });
+        const { patch, reason } = buildPatchForExisting(old, row, 'insert_duplicate_reactivate_v142');
+        await patchDailyRow(old, { ...patch, active: true });
         patchedDup++;
-        console.log(`duplicate daily_game patched instead of inserted: ${row.league} ${row.away} vs ${row.home} ${row.game_time} (${reason})`);
+        console.log(`duplicate daily_game reactivated v142: ${row.game_day_type} ${row.league} ${row.away} vs ${row.home} ${row.game_time} (${reason})`);
       } else {
-        // 找不到舊列但仍撞 unique，通常是 schema cache/隱藏舊資料；保守略過，不讓整批失敗。
-        console.warn(`duplicate daily_game skipped: ${row.league} ${row.away} vs ${row.home} ${row.game_time}`);
+        console.warn(`duplicate daily_game skipped v142 no matching row found: ${row.game_day_type} ${row.league} ${row.away} vs ${row.home} ${row.game_time}`);
       }
     }
   }
@@ -2070,6 +2085,20 @@ function buildPatchForExisting(old, row, modeLabel) {
 async function mergeDailyGames(rows, { markMissingInactive = false, modeLabel = 'merge' } = {}) {
   const incoming = dedupeGames(rows).map(r => stripDailyRow(withAnalysisMeta(r)));
   try { await writeRawSportsData(incoming); } catch(e) { console.warn('raw data center skipped:', e.message); }
+  // v142：先把這次來源確定有抓到的賽事恢復 active，修復凌晨不完整同步曾把場次關掉的狀況。
+  let reactivatedV142 = 0;
+  for (const row of incoming) {
+    try {
+      const existing = await supabaseRequest(`daily_games?${looseDailyUniqueFilter(row)}&active=eq.false&select=*&order=updated_at.desc&limit=1`, { method: 'GET' }).catch(() => []);
+      const old = Array.isArray(existing) ? existing[0] : null;
+      if (old) {
+        const { patch } = buildPatchForExisting(old, row, 'reactivate_incoming_v142');
+        await patchDailyRow(old, { ...patch, active: true });
+        reactivatedV142++;
+      }
+    } catch(e) { console.warn(`reactivate incoming v142 skipped: ${row.league} ${row.away} vs ${row.home} ${row.game_time}: ${e.message}`); }
+  }
+  if (reactivatedV142) console.log(`Reactivate incoming games v142: active restored count=${reactivatedV142}`);
 
   // v136：Supabase unique key daily_games_unique_game 沒有包含 game_date。
   // v135 只刪指定日期，若舊日期/非 active 資料仍有同樣 game_day_type+sport+league+time+home+away，仍會撞 unique。
@@ -2138,9 +2167,27 @@ async function mergeDailyGames(rows, { markMissingInactive = false, modeLabel = 
   let inactive = 0;
   if (markMissingInactive && incoming.length > 0) {
     const incomingKeys = new Set(incoming.map(gameIdentityKey));
+    // v141：凌晨 2-4 點來源頁常常「部分上架」，不是整個聯盟 0 場，而是原本 10 場只抓到 3-4 場。
+    // 若同一個 dayType+league 的 incoming 數量少於資料庫既有 active 數量，不要把缺少的舊場次標 inactive。
+    // 等後續來源完整時，incoming 數量追上來，才允許正常下架真的消失的場次。
+    const incomingPoolCounts = new Map();
+    const existingPoolCounts = new Map();
+    const poolKeyOf = r => `${r.game_day_type}|${r.league}`;
+    for (const r of incoming) incomingPoolCounts.set(poolKeyOf(r), (incomingPoolCounts.get(poolKeyOf(r)) || 0) + 1);
+    for (const r of existingList) existingPoolCounts.set(poolKeyOf(r), (existingPoolCounts.get(poolKeyOf(r)) || 0) + 1);
+    let protectedMissing = 0;
+    const protectedPools = new Map();
     for (const old of existingList) {
       const key = gameIdentityKey(old);
       if (!incomingKeys.has(key)) {
+        const poolKey = poolKeyOf(old);
+        const incomingCount = incomingPoolCounts.get(poolKey) || 0;
+        const existingCount = existingPoolCounts.get(poolKey) || 0;
+        if (incomingCount < existingCount) {
+          protectedMissing++;
+          protectedPools.set(poolKey, `${incomingCount}/${existingCount}`);
+          continue;
+        }
         inactive++;
         await patchDailyRow(old, {
           active: false,
@@ -2153,6 +2200,7 @@ async function mergeDailyGames(rows, { markMissingInactive = false, modeLabel = 
         }).catch(e => console.warn('mark inactive failed:', e.message));
       }
     }
+    if(protectedMissing) console.log(`Protect existing games v142 reactivate partial: kept active count=${protectedMissing}; pools=${[...protectedPools.entries()].map(([k,v])=>`${k}=${v}`).join(', ')}`);
   }
 
   const msg = `v120 ${modeLabel}: inserted=${inserted}, patched=${patched}, same_odds=${skipped}, market_opened=${marketOpened}, odds_changed=${oddsChanged}, pending_kept=${pendingKept}, display_moved=${displayMoved}, inactive=${inactive}, incoming=${incoming.length}`;
@@ -2197,7 +2245,7 @@ async function main() {
   const suppressedTodayKeys = promotionResult.suppressedTodayKeys || new Set();
   const scrapedAfterPromotion = scraped.filter(g => !(g.game_day_type === 'today' && suppressedTodayKeys.has(scrapedRunKey(g))));
   const games = [...scrapedAfterPromotion, ...promoted];
-  console.log(`Parsed valid games v139 score-promote display-pool: scraped=${scraped.length}, suppressedToday=${scraped.length - scrapedAfterPromotion.length}, promoted=${promoted.length}, total=${games.length}`);
+  console.log(`Parsed valid games v140 score-promote display-pool: scraped=${scraped.length}, suppressedToday=${scraped.length - scrapedAfterPromotion.length}, promoted=${promoted.length}, total=${games.length}`);
   console.log(games.slice(0, 80).map(g => `${g.game_day_type} ${g.league} ${g.game_time} ${g.away} vs ${g.home} | ${g.spread} | ${g.total}`).join('\n'));
   if (incremental) {
     await incrementalDailyGames(games);
